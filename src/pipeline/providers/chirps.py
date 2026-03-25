@@ -1,6 +1,9 @@
 import ee
 from .base import BaseSatelliteProvider
-from typing import Dict, List
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.pipeline.client import GEEClient
 
 class CHIRPSProvider(BaseSatelliteProvider):
     """
@@ -8,9 +11,10 @@ class CHIRPSProvider(BaseSatelliteProvider):
     Dataset ID: UCSB-CHG/CHIRPS/DAILY
     """
     
-    def __init__(self, collection_id: str = "UCSB-CHG/CHIRPS/DAILY", band: str = "precipitation"):
+    def __init__(self, collection_id: str = "UCSB-CHG/CHIRPS/DAILY", band: str = f"precipitation", client: Optional['GEEClient'] = None):
         self.collection_id = collection_id
         self.band = band
+        self.client = client
 
     def get_rainfall_data(self, aoi: ee.Geometry, start_date: str, end_date: str) -> Dict:
         """
@@ -33,4 +37,7 @@ class CHIRPSProvider(BaseSatelliteProvider):
             return ee.Feature(None, stats).set('system:time_start', image.get('system:time_start'))
 
         reduced_collection = collection.map(reduce_to_mean)
+        
+        if self.client:
+            return self.client.get_info(reduced_collection)
         return reduced_collection.getInfo()

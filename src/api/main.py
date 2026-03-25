@@ -12,13 +12,16 @@ import ee
 
 from fastapi import FastAPI, UploadFile, Form, HTTPException, File, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.pipeline.auth import authenticate_gee
 from src.pipeline.providers.chirps import CHIRPSProvider
 from src.pipeline.providers.gpm import GPMProvider
 from src.pipeline.processor import process_rainfall_data, fill_missing_reciprocal
+from src.pipeline.client import GEEClient
+from src.pipeline.analytics import calculate_trend
 
 logger = logging.getLogger(__name__)
 
@@ -33,87 +36,145 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global GEE Client
+gee_client = GEEClient()
+
 # Authenticate GEE on startup
 @app.on_event("startup")
 async def startup_event():
     try:
-        authenticate_gee()
-        logger.info("GEE Authenticated successfully for API.")
+        # GEEClient already ensures auth on init
+        logger.info("GEE Client initialized and ready.")
     except Exception as e:
-        logger.error(f"Failed to authenticate GEE on startup: {e}")
+        logger.error(f"Failed to initialize GEE Client on startup: {e}")
 
 # In-memory Job Store
 JOBS = {}
 
 def execute_pipeline(job_id: str, provider: str, start_date: str, end_date: str, aoi_data: dict):
     try:
-        # Extract Geometry (Real Mode)
+        # Extract Geometry
+        JOBS[job_id]["progress"] = 5
+        JOBS[job_id]["stage"] = "parsing_aoi"
+        
         if aoi_data.get('type') == 'FeatureCollection':
-            features = aoi_data.get('features', [])
-            if not features:
-                raise ValueError("FeatureCollection is empty.")
-            ee_geometry = ee.Geometry(features[0]['geometry'])
+            ee_geometry = ee.Geometry(aoi_data['features'][0]['geometry'])
         elif aoi_data.get('type') == 'Feature':
             ee_geometry = ee.Geometry(aoi_data['geometry'])
         else:
             ee_geometry = ee.Geometry(aoi_data)
 
-        # Get Providers
-        providers_to_run = []
+        # Initialize Providers with Shared Client
+        JOBS[job_id]["progress"] = 10
+        JOBS[job_id]["stage"] = "initializing_providers"
+        
+        provider_map = {
+            'chirps': CHIRPSProvider(client=gee_client),
+            'gpm': GPMProvider(client=gee_client)
+        }
+        
         if provider.lower() == 'both':
-            providers_to_run = [('chirps', CHIRPSProvider()), ('gpm', GPMProvider())]
-        elif provider.lower() == 'chirps':
-            providers_to_run = [('chirps', CHIRPSProvider())]
-        elif provider.lower() == 'gpm':
-            providers_to_run = [('gpm', GPMProvider())]
+            selected_providers = [('chirps', provider_map['chirps']), ('gpm', provider_map['gpm'])]
         else:
-            raise ValueError(f"Unknown provider: {provider}")
+            p_key = provider.lower()
+            if p_key not in provider_map:
+                raise ValueError(f"Unknown provider: {provider}")
+            selected_providers = [(p_key, provider_map[p_key])]
 
-        # Fetch Real Data
+        JOBS[job_id]["progress"] = 20
+        JOBS[job_id]["stage"] = "fetching_data"
+        
+        # Concurrent Data Fetching
+        results_dfs = {}
+        with ThreadPoolExecutor(max_workers=len(selected_providers)) as executor:
+            future_to_provider = {
+                executor.submit(p_obj.get_rainfall_data, ee_geometry, start_date, end_date): p_name 
+                for p_name, p_obj in selected_providers
+            }
+            
+            for future in as_completed(future_to_provider):
+                p_name = future_to_provider[future]
+                try:
+                    raw_data = future.result()
+                    if not raw_data or not raw_data.get('features'):
+                        logger.warning(f"Provider {p_name} returned no images.")
+                        continue
+                        
+                    df = process_rainfall_data(raw_data, timezone="UTC")
+                    logger.info(f"Provider {p_name} returned {len(df)} rows.")
+                    
+                    df['date'] = df['date'].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    
+                    # Clean columns
+                    for col in ['precipitation', 'rolling_avg_7d', 'z_score']:
+                        if col in df.columns:
+                            df[col] = df[col].astype(object).where(pd.notna(df[col]), None)
+                    
+                    if provider.lower() == 'both':
+                        df = df.rename(columns={
+                            'precipitation': f'precip_{p_name}',
+                            'rolling_avg_7d': f'rolling_{p_name}',
+                            'is_anomaly': f'anomaly_{p_name}'
+                        }).drop(columns=['z_score'], errors='ignore')
+                    
+                    results_dfs[p_name] = df
+                    # Partial progress
+                    JOBS[job_id]["progress"] = min(80, JOBS[job_id].get("progress", 20) + (60 // len(selected_providers)))
+                    
+                except Exception as e:
+                    logger.error(f"Provider {p_name} failed: {e}")
+                    raise e
+
+        if not results_dfs:
+            JOBS[job_id]["status"] = "completed"
+            JOBS[job_id]["result"] = []
+            JOBS[job_id]["error"] = "No images found for the selected area and date range in Earth Engine."
+            return
+
+        # Merging Results
+        JOBS[job_id]["stage"] = "merging_results"
         merged_df = None
-        for p_name, rain_provider in providers_to_run:
-            raw_data = rain_provider.get_rainfall_data(ee_geometry, start_date, end_date)
-            df = process_rainfall_data(raw_data, timezone="UTC")
-            df['date'] = df['date'].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-            
-            for col in ['precipitation', 'rolling_avg_7d', 'z_score']:
-                if col in df.columns:
-                    df[col] = df[col].astype(object).where(pd.notna(df[col]), None)
-            if 'is_anomaly' in df.columns:
-                df['is_anomaly'] = df['is_anomaly'].astype('boolean')
-            
-            if provider.lower() == 'both':
-                rename_map = {
-                    'precipitation': f'precip_{p_name}',
-                    'rolling_avg_7d': f'rolling_{p_name}',
-                    'is_anomaly': f'anomaly_{p_name}'
-                }
-                df = df.rename(columns=rename_map)
-                df = df.drop(columns=['z_score'], errors='ignore')
-                
+        for p_name, df in results_dfs.items():
             if merged_df is None:
                 merged_df = df
             else:
                 merged_df = pd.merge(merged_df, df, on='date', how='outer')
 
-        if merged_df is None:
-            JOBS[job_id]["status"] = "completed"
+        if merged_df is not None:
+            logger.info(f"Merged DataFrame rows: {len(merged_df)}, columns: {list(merged_df.columns)}")
+            # Final Cleanup
+            for col in merged_df.columns:
+                # Ensure all numeric columns that might have NaNs are converted to object type
+                # to allow None for JSON serialization, if they are not already.
+                if pd.api.types.is_numeric_dtype(merged_df[col]) and merged_df[col].isnull().any():
+                    merged_df[col] = merged_df[col].astype(object).where(pd.notna(merged_df[col]), None)
+
+            # Run Trend Analysis (Analytics Layer)
+            trend_results = {}
+            if provider.lower() == 'both':
+                for p_name in results_dfs.keys():
+                    p_col = f'precip_{p_name}'
+                    trend_results[p_name] = calculate_trend(merged_df, column=p_col)
+            else:
+                trend_results[provider.lower()] = calculate_trend(merged_df, column='precipitation')
+            
+            JOBS[job_id]["analytics"] = trend_results
+            JOBS[job_id]["result"] = merged_df.to_dict(orient="records")
+            # Cache the DF for export
+            JOBS[job_id]["_df"] = merged_df
+        else:
             JOBS[job_id]["result"] = []
-            return
 
-        # Clean NaNs in merged df boolean columns
-        for col in merged_df.columns:
-            if 'anomaly' in col:
-                merged_df[col] = merged_df[col].fillna(False).astype(bool)
-
-        results = merged_df.to_dict(orient="records")
+        JOBS[job_id]["progress"] = 100
+        JOBS[job_id]["stage"] = "completed"
         JOBS[job_id]["status"] = "completed"
-        JOBS[job_id]["result"] = results
 
     except Exception as e:
-        logger.error(f"Job {job_id} failed: {str(e)}")
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Job {job_id} failed: {str(e)}\n{error_details}")
         JOBS[job_id]["status"] = "failed"
-        JOBS[job_id]["error"] = str(e)
+        JOBS[job_id]["error"] = f"{str(e)}"
 
 
 @app.post("/api/jobs")
@@ -156,11 +217,64 @@ async def start_pipeline_job(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/jobs/point")
+async def start_point_job(
+    background_tasks: BackgroundTasks,
+    lat: float = Form(...),
+    lon: float = Form(...),
+    provider: str = Form(...),
+    start_date: str = Form(...),
+    end_date: str = Form(...)
+):
+    try:
+        # Create Point Geometry
+        ee_geometry = ee.Geometry.Point([lon, lat])
+        # Convert to dict format expected by execute_pipeline
+        aoi_data = ee_geometry.toGeoJSON()
+
+        job_id = str(uuid.uuid4())
+        JOBS[job_id] = {"status": "running", "type": "point", "lat": lat, "lon": lon}
+
+        background_tasks.add_task(
+            execute_pipeline, 
+            job_id, 
+            provider, 
+            start_date, 
+            end_date, 
+            aoi_data
+        )
+        
+        return {"job_id": job_id}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/jobs/{job_id}")
 async def fetch_job_status(job_id: str):
     if job_id not in JOBS:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return JSONResponse(content=JOBS[job_id])
+    
+    # Filter out internal fields (like _df) that are not JSON serializable
+    public_status = {k: v for k, v in JOBS[job_id].items() if not k.startswith('_')}
+    return JSONResponse(content=public_status)
+
+
+@app.get("/api/jobs/{job_id}/export")
+async def export_job_data(job_id: str):
+    if job_id not in JOBS or "_df" not in JOBS[job_id]:
+        raise HTTPException(status_code=404, detail="Job data or export not available.")
+    
+    df = JOBS[job_id]["_df"]
+    import io
+    stream = io.StringIO()
+    df.to_csv(stream, index=False)
+    response = StreamingResponse(
+        iter([stream.getvalue()]),
+        media_type="text/csv"
+    )
+    response.headers["Content-Disposition"] = f"attachment; filename=rainfall_export_{job_id}.csv"
+    return response
 
 
 # Map layer tile generating endpoint
@@ -191,8 +305,8 @@ async def generate_map_layer(
     p_name = 'ucsb-chg/chirps/daily'
     band = 'precipitation'
     if provider.lower() == 'gpm' or provider.lower() == 'both':
-        p_name = 'NASA/GPM_L3/IMERG_V06'
-        band = 'HQprecipitation'
+        p_name = 'NASA/GPM_L3/IMERG_V07'
+        band = 'precipitation'
         
     img_col = ee.ImageCollection(p_name).filterDate(start_date, end_date).filterBounds(ee_geometry)
     img_sum = img_col.select(band).sum().clip(ee_geometry)

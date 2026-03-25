@@ -85,6 +85,17 @@
                         </svg>
                     </button>
                     <div id="form-error" class="error-msg hidden"></div>
+
+                    <!-- Progress Tracker (New) -->
+                    <div id="progress-container" class="progress-container hidden">
+                        <div class="progress-label">
+                            <span id="progress-stage">Initializing...</span>
+                            <span id="progress-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="progress-inner" class="progress-inner"></div>
+                        </div>
+                    </div>
                 </form>
             </aside>
 
@@ -122,7 +133,7 @@
                     <div class="chart-container glass-card">
                         <h2 class="section-title">Time Series Analysis</h2>
                         <div class="chart-wrapper">
-                            <canvas id="rainfallChart"></canvas>
+                            <div id="rainfallChart" style="width: 100%; height: 100%;"></div>
                         </div>
                     </div>
                 </div>
@@ -156,8 +167,8 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Apache ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
     <!-- App Logic -->
     <script src="/app.js"></script>
 </body>

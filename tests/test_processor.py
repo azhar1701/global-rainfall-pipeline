@@ -32,12 +32,14 @@ def test_process_rainfall_data_timezone_conversion(sample_gee_data):
     assert df['date'].dt.tz.zone == 'Asia/Tokyo'
 
 def test_process_rainfall_data_nan_handling(sample_gee_data):
-    """Test that missing precipitation values become NaN, not 0."""
+    """Test that missing precipitation values are imputed, not left as NaN."""
     df = process_rainfall_data(sample_gee_data, timezone='UTC')
     missing_row = df[df['date'].dt.strftime('%Y-%m-%d') == '2023-01-03']
     assert len(missing_row) == 1
     val = missing_row.iloc[0]['precipitation']
-    assert np.isnan(val)
+    # Imputation should have filled this value
+    assert not np.isnan(val)
+    assert val > 0 # Based on sample data 5.5 and 10.2
     
     zero_row = df[df['date'].dt.strftime('%Y-%m-%d') == '2023-01-02']
     assert zero_row.iloc[0]['precipitation'] == 0.0

@@ -1,4 +1,4 @@
-.env
+.env*
 gen-lang-client-*.json
 __pycache__/
 *.pyc
@@ -7,3 +7,5 @@ venv/
 .venv/
 .env.example
 .superpowers/
+.idea/
+.vscode/

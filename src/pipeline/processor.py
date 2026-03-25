@@ -60,12 +60,22 @@ def process_rainfall_data(raw_data: Union[Dict, List[Dict]], timezone: str = 'UT
             else:
                 dt = None
             
-            # Find the precipitation property dynamically (it could be 'precipitation' or 'HQprecipitation' etc)
+            # Known rainfall property names
+            known_keys = ['precipitation', 'precip', 'HQprecipitation', 'daily_precipitation']
             precip_val = None
-            for key, val in props.items():
-                if key != 'system:time_start':
-                    precip_val = val
+            
+            # First try known keys
+            for k in known_keys:
+                if k in props:
+                    precip_val = props[k]
                     break
+            
+            # Fallback: first non-system property that is numeric
+            if precip_val is None:
+                for key, val in props.items():
+                    if not key.startswith('system:') and isinstance(val, (int, float)):
+                        precip_val = val
+                        break
                     
             parsed_data.append({'date': dt, 'precipitation': precip_val})
             

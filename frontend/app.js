@@ -2,8 +2,8 @@
 
 let map;
 let geojsonLayer;
-let rainfallChart;
 let currentData = null;
+let chartInstance = null;
 
 // Initialize Map and Chart on Load
 document.addEventListener('DOMContentLoaded', () => {
@@ -22,81 +22,44 @@ function initMap() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
+
+    // Map Click Handler for Point-Sampling
+    map.on('click', async (e) => {
+        const { lat, lng } = e.latlng;
+        handlePointSample(lat, lng);
+    });
 }
 
 // Setup Chart.js
+// Setup Apache ECharts
 function initChart() {
-    const ctx = document.getElementById('rainfallChart').getContext('2d');
+    const chartDom = document.getElementById('rainfallChart');
+    if (!chartDom) return;
+    chartInstance = echarts.init(chartDom, 'dark', { renderer: 'canvas', useDirtyRect: true });
 
-    Chart.defaults.color = '#94A3B8';
-    Chart.defaults.font.family = "'Fira Sans', sans-serif";
-
-    rainfallChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [{
-                label: 'Precipitation (mm)',
-                data: [],
-                borderColor: '#3B82F6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                borderWidth: 2,
-                pointBackgroundColor: '#14B8A6',
-                pointBorderColor: '#0B1120',
-                pointRadius: 3,
-                pointHoverRadius: 6,
-                fill: true,
-                tension: 0.4
-            },
-            {
-                label: '7-Day Avg (mm)',
-                data: [],
-                borderColor: '#14B8A6',
-                borderWidth: 2,
-                borderDash: [5, 5],
-                pointRadius: 0,
-                fill: false,
-                tension: 0.4
-            }]
+    const option = {
+        backgroundColor: 'transparent',
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'cross', label: { backgroundColor: '#1E293B' } }
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top',
-                    labels: { color: '#94A3B8', usePointStyle: true, boxWidth: 8 }
-                },
-                tooltip: {
-                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                    titleColor: '#F8FAFC',
-                    bodyColor: '#3B82F6',
-                    padding: 12,
-                    cornerRadius: 8,
-                    displayColors: false,
-                    callbacks: {
-                        label: function (context) {
-                            return `${context.parsed.y.toFixed(2)} mm`;
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
-                },
-                y: {
-                    beginAtZero: true,
-                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                    title: {
-                        display: true,
-                        text: 'mm / day',
-                        color: '#60A5FA'
-                    }
-                }
-            }
-        }
+        grid: {
+            left: '4%',
+            right: '4%',
+            bottom: '10%',
+            top: '15%',
+            containLabel: true
+        },
+        xAxis: { type: 'category', boundaryGap: false, data: [] },
+        yAxis: { type: 'value', name: 'mm / day', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } },
+        series: []
+    };
+
+    chartInstance.setOption(option);
+
+    // Ensure responsiveness
+    window.addEventListener('resize', () => {
+        chartInstance && chartInstance.resize();
     });
 }
 
@@ -197,60 +160,13 @@ function setupForm() {
                 throw new Error(errData.detail || "Failed to submit pipeline job.");
             }
 
-            const jobData = await response.json();
-            const jobId = jobData.job_id;
+            const { job_id } = await response.json();
+            await pollJobStatus(job_id, formData);
 
-            let isComplete = false;
-            let dots = 0;
-            while (!isComplete) {
-                // Wait 1.5 seconds before polling
-                await new Promise(r => setTimeout(r, 1500));
-
-                const pollResp = await fetch(`/api/jobs/${jobId}`);
-                if (!pollResp.ok) throw new Error("Failed to poll server.");
-
-                const statusData = await pollResp.json();
-
-                if (statusData.status === 'failed') {
-                    throw new Error(statusData.error || "Job processor failed internally.");
-                } else if (statusData.status === 'completed') {
-                    currentData = statusData.result;
-                    updateVisualizations(currentData);
-                    isComplete = true;
-
-                    // Fetch Map Overlay TileLayer from Earth Engine
-                    try {
-                        btnText.textContent = "Loading Map Overlay...";
-                        const mapResp = await fetch('/api/map-layer', {
-                            method: 'POST',
-                            body: formData
-                        });
-
-                        if (mapResp.ok) {
-                            const mapData = await mapResp.json();
-                            if (mapData.url && mapData.url.length > 5) {
-                                if (window.rainfallTileLayer) {
-                                    map.removeLayer(window.rainfallTileLayer);
-                                }
-                                window.rainfallTileLayer = L.tileLayer(mapData.url, {
-                                    opacity: 0.7,
-                                    maxZoom: 18,
-                                    attribution: 'Map Data &copy; Google Earth Engine'
-                                }).addTo(map);
-                            }
-                        }
-                    } catch (mapErr) {
-                        console.warn('Failed to load map overlay tilelayer:', mapErr);
-                    }
-
-                } else {
-                    dots = (dots + 1) % 4;
-                    btnText.textContent = "Processing" + ".".repeat(dots);
-                }
-            }
         } catch (error) {
             console.error("Pipeline Error:", error);
             showError(error.message);
+            updateProgress(0, "Error", true);
         } finally {
             submitBtn.disabled = false;
             btnText.textContent = "Run Pipeline";
@@ -259,9 +175,119 @@ function setupForm() {
     });
 }
 
-function updateVisualizations(data) {
+// Map Click Handler
+async function handlePointSample(lat, lon) {
+    const provider = document.getElementById('provider').value;
+    const start_date = document.getElementById('start_date').value;
+    const end_date = document.getElementById('end_date').value;
+
+    hideError();
+    updateProgress(5, "Contacting GEE...");
+
+    const formData = new FormData();
+    formData.append('lat', lat);
+    formData.append('lon', lon);
+    formData.append('provider', provider);
+    formData.append('start_date', start_date);
+    formData.append('end_date', end_date);
+
+    try {
+        const resp = await fetch('/api/jobs/point', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!resp.ok) throw new Error("Failed to sample point.");
+        const { job_id } = await resp.json();
+
+        // Add Marker
+        if (window.pointMarker) map.removeLayer(window.pointMarker);
+        window.pointMarker = L.marker([lat, lon]).addTo(map).bindPopup("Sampling Point...").openPopup();
+
+        await pollJobStatus(job_id, null);
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+// Generalized Polling
+async function pollJobStatus(jobId, originalFormData) {
+    const progressContainer = document.getElementById('progress-container');
+    progressContainer.classList.remove('hidden');
+
+    let isComplete = false;
+    while (!isComplete) {
+        await new Promise(r => setTimeout(r, 1500));
+        const resp = await fetch(`/api/jobs/${jobId}`);
+        const statusData = await resp.json();
+
+        if (statusData.status === 'failed') {
+            throw new Error(statusData.error || "Job failed.");
+        }
+
+        updateProgress(statusData.progress || 0, statusData.stage || "Processing");
+
+        if (statusData.status === 'completed') {
+            window.lastJobId = jobId; // Store for export
+            currentData = statusData.result;
+            updateVisualizations(currentData, statusData.analytics, statusData.error);
+            isComplete = true;
+
+            // Load map layer ONLY if we have originalFormData (meaning it's not a point sample)
+            if (originalFormData) {
+                loadMapOverlay(originalFormData);
+            }
+
+            setTimeout(() => progressContainer.classList.add('hidden'), 2000);
+        }
+    }
+}
+
+function updateProgress(percent, stage, isError = false) {
+    const inner = document.getElementById('progress-inner');
+    const label = document.getElementById('progress-stage');
+    const pct = document.getElementById('progress-percent');
+
+    inner.style.width = `${percent}%`;
+    label.textContent = stage.replace('_', ' ').toUpperCase();
+    pct.textContent = `${percent}%`;
+
+    if (isError) {
+        inner.style.background = '#EF4444';
+    } else {
+        inner.style.background = 'var(--primary-color)';
+    }
+}
+
+async function loadMapOverlay(formData) {
+    try {
+        const mapResp = await fetch('/api/map-layer', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (mapResp.ok) {
+            const mapData = await mapResp.json();
+            if (mapData.url) {
+                if (window.rainfallTileLayer) map.removeLayer(window.rainfallTileLayer);
+                window.rainfallTileLayer = L.tileLayer(mapData.url, {
+                    opacity: 0.7,
+                    maxZoom: 18,
+                    attribution: 'Google Earth Engine'
+                }).addTo(map);
+            }
+        }
+    } catch (e) { console.warn(e); }
+}
+
+function updateVisualizations(data, analytics, errorMsg) {
+    if (errorMsg) {
+        showError(errorMsg);
+        return;
+    }
+
     if (!data || data.length === 0) {
-        showError("No data returned for the selected criteria.");
+        showError("No data found for this selection. Try a different date range or location.");
         return;
     }
 
@@ -271,8 +297,7 @@ function updateVisualizations(data) {
     const validData = isBoth ? data.filter(d => d.precip_chirps !== null) : data.filter(d => d.precipitation !== null);
     const precips = isBoth ? validData.map(d => d.precip_chirps) : validData.map(d => d.precipitation);
 
-    let total = 0;
-    let max = 0;
+    let total = 0, max = 0;
     if (precips.length > 0) {
         total = precips.reduce((a, b) => a + b, 0);
         max = Math.max(...precips);
@@ -285,71 +310,80 @@ function updateVisualizations(data) {
     document.getElementById('stat-max').textContent = `${max.toFixed(1)} mm`;
     document.getElementById('stat-anomalies').textContent = anomalies;
 
-    if (anomalies > 0) {
-        document.getElementById('stat-anomalies').style.color = '#EF4444';
-    } else {
-        document.getElementById('stat-anomalies').style.color = '#14B8A6';
+    // Trend Annotation in Title
+    const chartTitle = document.querySelector('.chart-container .section-title');
+    if (analytics) {
+        const firstKey = Object.keys(analytics)[0];
+        const trend = analytics[firstKey];
+        if (trend.status === 'success') {
+            chartTitle.innerHTML = `Time Series Analysis <span style="font-size:0.75rem; color:#14B8A6">(Trend: ${trend.trend})</span>`;
+        }
     }
 
-    // 2. Update Chart
-    rainfallChart.data.labels = data.map(d => formatDate(d.date));
+    // 2. Update ECharts
+    const dates = data.map(d => formatDate(d.date));
+    let series = [];
 
     if (isBoth) {
-        rainfallChart.data.datasets = [
+        series = [
             {
-                label: 'CHIRPS (mm)',
+                name: 'CHIRPS',
+                type: 'line',
                 data: data.map(d => d.precip_chirps),
-                borderColor: '#3B82F6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                borderWidth: 2,
-                pointBackgroundColor: data.map(d => d.anomaly_chirps ? '#EF4444' : '#3B82F6'),
-                pointRadius: data.map(d => d.anomaly_chirps ? 6 : 3),
-                fill: true,
-                tension: 0.4,
-                pointHoverRadius: 6
+                smooth: true,
+                areaStyle: { opacity: 0.1 },
+                itemStyle: { color: '#3B82F6' },
+                markPoint: {
+                    data: data.filter(d => d.anomaly_chirps).map(d => ({ coord: [formatDate(d.date), d.precip_chirps], symbol: 'pin', itemStyle: { color: '#EF4444' } }))
+                }
             },
             {
-                label: 'GPM (mm)',
+                name: 'GPM',
+                type: 'line',
                 data: data.map(d => d.precip_gpm),
-                borderColor: '#F97316',
-                backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                borderWidth: 2,
-                pointBackgroundColor: data.map(d => d.anomaly_gpm ? '#EF4444' : '#F97316'),
-                pointRadius: data.map(d => d.anomaly_gpm ? 6 : 3),
-                fill: true,
-                tension: 0.4,
-                pointHoverRadius: 6
+                smooth: true,
+                areaStyle: { opacity: 0.1 },
+                itemStyle: { color: '#F97316' },
+                markPoint: {
+                    data: data.filter(d => d.anomaly_gpm).map(d => ({ coord: [formatDate(d.date), d.precip_gpm], symbol: 'pin', itemStyle: { color: '#EF4444' } }))
+                }
             }
         ];
     } else {
-        rainfallChart.data.datasets = [
+        series = [
             {
-                label: 'Precipitation (mm)',
+                name: 'Precipitation',
+                type: 'line',
                 data: data.map(d => d.precipitation),
-                borderColor: '#3B82F6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                borderWidth: 2,
-                pointBackgroundColor: data.map(d => d.is_anomaly ? '#EF4444' : '#14B8A6'),
-                pointRadius: data.map(d => d.is_anomaly ? 6 : 3),
-                fill: true,
-                tension: 0.4,
-                pointHoverRadius: 6
+                smooth: true,
+                areaStyle: { opacity: 0.1 },
+                itemStyle: { color: '#3B82F6' },
+                markPoint: {
+                    data: data.filter(d => d.is_anomaly).map(d => ({ coord: [formatDate(d.date), d.precipitation], symbol: 'pin', itemStyle: { color: '#EF4444' } }))
+                }
             },
             {
-                label: '7-Day Avg (mm)',
-                data: data.map(d => d.rolling_avg_7d !== undefined ? d.rolling_avg_7d : null),
-                borderColor: '#14B8A6',
-                borderWidth: 2,
-                borderDash: [5, 5],
-                pointRadius: 0,
-                fill: false,
-                tension: 0.4,
-                pointHoverRadius: 6
+                name: '7-Day Avg',
+                type: 'line',
+                data: data.map(d => d.rolling_avg_7d),
+                lineStyle: { type: 'dashed' },
+                itemStyle: { color: '#14B8A6' },
+                symbol: 'none'
             }
         ];
     }
 
-    rainfallChart.update();
+    chartInstance.setOption({
+        legend: {
+            data: isBoth ? ['CHIRPS', 'GPM'] : ['Precipitation', '7-Day Avg'],
+            top: 0
+        },
+        xAxis: { data: dates },
+        series: series
+    });
+
+    // Final resize to ensure it fits the container after data load
+    setTimeout(() => chartInstance.resize(), 100);
 
     // 3. Update Table
     const tbody = document.querySelector('#data-table tbody');
@@ -405,32 +439,13 @@ function updateVisualizations(data) {
 function setupDownload() {
     const btn = document.getElementById('download-btn');
     btn.addEventListener('click', () => {
-        if (!currentData || currentData.length === 0) return;
-
-        const isBoth = 'precip_chirps' in currentData[0];
-        const headers = isBoth ? ["date", "chirps_precipitation", "gpm_precipitation"] : ["date", "precipitation"];
-
-        const rows = currentData.map(row => {
-            const dateStr = formatDateFull(row.date);
-            if (isBoth) {
-                const c = row.precip_chirps === null ? '' : row.precip_chirps;
-                const g = row.precip_gpm === null ? '' : row.precip_gpm;
-                return `${dateStr},${c},${g}`;
-            } else {
-                const p = (row.precipitation === null || isNaN(row.precipitation)) ? '' : row.precipitation;
-                return `${dateStr},${p}`;
-            }
-        });
-
-        const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.join("\n");
-        const encodedUri = encodeURI(csvContent);
-
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "rainfall_data_export.csv");
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // Use the new backend export endpoint
+        // Extract jobId from recent polling (needs to be stored)
+        if (window.lastJobId) {
+            window.open(`/api/jobs/${window.lastJobId}/export`, '_blank');
+        } else {
+            alert("No job data available to export yet.");
+        }
     });
 }
 

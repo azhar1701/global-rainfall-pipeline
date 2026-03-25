@@ -10,3 +10,6 @@ pytest-mock
 pydantic
 google-auth
 numpy
+fastapi
+uvicorn
+python-multipart
