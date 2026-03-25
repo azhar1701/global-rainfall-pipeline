@@ -1,0 +1,40 @@
+[project]
+name = "global-rainfall-pipeline"
+version = "0.1.0"
+description = "Pipeline for fetching and processing global satellite rainfall data from Google Earth Engine"
+requires-python = ">=3.10"
+dependencies = [
+    "earthengine-api",
+    "pandas",
+    "geopandas",
+    "shapely",
+    "pyyaml",
+    "python-dotenv",
+    "pyarrow",
+    "pydantic",
+    "google-auth",
+    "numpy",
+    "fastapi",
+    "uvicorn",
+    "python-multipart"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-mock",
+]
+
+[project.scripts]
+rainfall-pipeline = "pipeline.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

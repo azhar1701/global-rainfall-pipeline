@@ -1,0 +1,9 @@
+.env
+gen-lang-client-*.json
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+.env.example
+.superpowers/

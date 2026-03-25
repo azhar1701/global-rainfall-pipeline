@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Rainfall Pipeline</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Top Navigation -->
+        <header class="top-nav">
+            <div class="logo">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                    class="feather feather-globe text-primary">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path
+                        d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+                    </path>
+                </svg>
+                <h1>Global Rainfall Pipeline</h1>
+            </div>
+            <div class="system-status">
+                <span class="status-indicator"></span> System Online
+            </div>
+        </header>
+
+        <!-- Main Dashboard -->
+        <main class="dashboard">
+            <!-- Sidebar Controls -->
+            <aside class="sidebar glass-card">
+                <h2 class="section-title">Configuration</h2>
+                <form id="pipeline-form">
+
+                    <div class="form-group">
+                        <label for="provider">Data Provider</label>
+                        <select id="provider" name="provider" required>
+                            <option value="chirps">CHIRPS (Daily, ~0.05°)</option>
+                            <option value="gpm">GPM IMERG (Daily, ~0.1°)</option>
+                            <option value="both">Both (CHIRPS + GPM Comparison)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="start_date">Start Date</label>
+                        <input type="date" id="start_date" name="start_date" required placeholder="YYYY-MM-DD"
+                            value="2024-01-01">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="end_date">End Date</label>
+                        <input type="date" id="end_date" name="end_date" required placeholder="YYYY-MM-DD"
+                            value="2024-01-31">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="aoi_file">Area of Interest (GeoJSON)</label>
+                        <div class="file-drop-area" id="drop-area">
+                            <span class="file-msg">Choose a .geojson file or drag it here</span>
+                            <input class="file-input" type="file" id="aoi_file" name="aoi_file"
+                                accept=".geojson,application/geo+json" required>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="submit-btn" class="btn-cta">
+                        <span class="btn-text">Run Pipeline</span>
+                        <svg class="spinner hidden" viewBox="0 0 50 50">
+                            <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+                        </svg>
+                    </button>
+                    <div id="form-error" class="error-msg hidden"></div>
+                </form>
+            </aside>
+
+            <!-- Visualization Area -->
+            <section class="visualizations">
+                <!-- Data Overview Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card glass-card">
+                        <div class="stat-title">Total Precipitation</div>
+                        <div class="stat-value font-data" id="stat-total">-- mm</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-title">Daily Average</div>
+                        <div class="stat-value font-data" id="stat-avg">-- mm</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-title">Max Single Day</div>
+                        <div class="stat-value font-data" id="stat-max">-- mm</div>
+                    </div>
+                    <div class="stat-card glass-card">
+                        <div class="stat-title">Anomalies</div>
+                        <div class="stat-value font-data text-error" id="stat-anomalies">0</div>
+                    </div>
+                </div>
+
+                <!-- Map & Chart Split -->
+                <div class="vis-split">
+                    <!-- Map -->
+                    <div class="map-container glass-card">
+                        <h2 class="section-title">Area of Interest preview</h2>
+                        <div id="map"></div>
+                    </div>
+
+                    <!-- Chart -->
+                    <div class="chart-container glass-card">
+                        <h2 class="section-title">Time Series Analysis</h2>
+                        <div class="chart-wrapper">
+                            <canvas id="rainfallChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Data Table -->
+                <div class="data-table-container glass-card">
+                    <div class="table-header">
+                        <h2 class="section-title">Raw Data Export</h2>
+                        <button id="download-btn" class="btn-secondary" disabled>Download CSV</button>
+                    </div>
+                    <div class="table-scroll">
+                        <table id="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Date (UTC)</th>
+                                    <th>Precipitation (mm)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="2" class="text-center text-muted">Awaiting pipeline execution...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- App Logic -->
+    <script src="/app.js"></script>
+</body>
+
+</html>

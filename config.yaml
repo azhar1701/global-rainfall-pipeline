@@ -1,0 +1,17 @@
+aoi:
+  geojson_path: "data/aoi.geojson"
+  scope: "global"
+
+date_range:
+  start_date: "2024-01-01"
+  end_date: "2024-01-31"
+
+timezone: "UTC"
+
+providers:
+  chirps:
+    collection: "UCSB-CHG/CHIRPS/DAILY"
+    band: "precipitation"
+  gpm:
+    collection: "NASA/GPM_L3/IMERG_V07"
+    band: "precipitation"

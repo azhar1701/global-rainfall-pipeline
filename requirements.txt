@@ -1,0 +1,12 @@
+earthengine-api
+pandas
+geopandas
+shapely
+pyyaml
+python-dotenv
+pyarrow
+pytest
+pytest-mock
+pydantic
+google-auth
+numpy

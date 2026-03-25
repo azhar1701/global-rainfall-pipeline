@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: global-rainfall-pipeline
+Version: 0.1.0
+Summary: Pipeline for fetching and processing global satellite rainfall data from Google Earth Engine
+Requires-Python: >=3.10
+Requires-Dist: earthengine-api
+Requires-Dist: pandas
+Requires-Dist: geopandas
+Requires-Dist: shapely
+Requires-Dist: pyyaml
+Requires-Dist: python-dotenv
+Requires-Dist: pyarrow
+Requires-Dist: pydantic
+Requires-Dist: google-auth
+Requires-Dist: numpy
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: python-multipart
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-mock; extra == "dev"

@@ -1,0 +1,17 @@
+earthengine-api
+pandas
+geopandas
+shapely
+pyyaml
+python-dotenv
+pyarrow
+pydantic
+google-auth
+numpy
+fastapi
+uvicorn
+python-multipart
+
+[dev]
+pytest
+pytest-mock
