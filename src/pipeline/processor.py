@@ -1,20 +1,29 @@
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Optional
 import pandas as pd
 import numpy as np
 from datetime import datetime
 
-def fill_missing_reciprocal(series: pd.Series, power: float = 1.0, window: int = 14) -> pd.Series:
+def fill_missing_reciprocal(series: pd.Series, power: float = 1.0, window: int = 14, max_gap: int = 3) -> pd.Series:
     """
     Fills missing values in a 1D time series using the Reciprocal Method (Inverse Distance Weighting).
     Weights are calculated using the reciprocal of the temporal index distance: 1 / (distance^power).
+    Only interpolates if the gap size is <= max_gap.
     """
     filled = series.copy()
     missing_mask = filled.isna()
     if not missing_mask.any():
         return filled
 
+    # Group consecutive NaNs to find gap sizes
+    is_missing = missing_mask.astype(int)
+    gap_groups = (is_missing != is_missing.shift()).cumsum()
+    gap_sizes = is_missing.groupby(gap_groups).transform('sum')
+
+    # Only interpolate missing values that belong to a gap <= max_gap
+    interpolable_mask = missing_mask & (gap_sizes <= max_gap)
+    
     valid_indices = np.where(~missing_mask)[0]
-    missing_indices = np.where(missing_mask)[0]
+    missing_indices = np.where(interpolable_mask)[0]
 
     if len(valid_indices) == 0:
         # Cannot interpolate if the entire series is empty
@@ -40,7 +49,7 @@ def fill_missing_reciprocal(series: pd.Series, power: float = 1.0, window: int =
         
     return filled
 
-def process_rainfall_data(raw_data: Union[Dict, List[Dict]], timezone: str = 'UTC') -> pd.DataFrame:
+def process_rainfall_data(raw_data: Union[Dict, List[Dict]], start_date: Optional[str] = None, end_date: Optional[str] = None, timezone: str = 'UTC') -> pd.DataFrame:
     """
     Converts GEE FeatureCollection JSON to DataFrame, handles missing values, and sets timezone.
     """
@@ -73,7 +82,10 @@ def process_rainfall_data(raw_data: Union[Dict, List[Dict]], timezone: str = 'UT
             # Fallback: first non-system property that is numeric
             if precip_val is None:
                 for key, val in props.items():
-                    if not key.startswith('system:') and isinstance(val, (int, float)):
+                    # Skip failed markers and internal booleans
+                    if key == 'is_failed' or key == 'error':
+                        continue
+                    if not key.startswith('system:') and isinstance(val, (int, float)) and not isinstance(val, bool):
                         precip_val = val
                         break
                     
@@ -106,6 +118,20 @@ def process_rainfall_data(raw_data: Union[Dict, List[Dict]], timezone: str = 'UT
     
     # Sort by date to ensure rolling calculations and reciprocal indexing are correct
     df = df.sort_values(by='date').reset_index(drop=True)
+    
+    # Enforce strict daily frequency over the requested date range
+    if start_date and end_date:
+        full_index = pd.date_range(
+            start=pd.to_datetime(start_date).tz_localize('UTC').tz_convert(timezone),
+            end=pd.to_datetime(end_date).tz_localize('UTC').tz_convert(timezone),
+            freq='D'
+        )
+        df.set_index('date', inplace=True)
+        # Drop duplicates just in case (e.g. multiple failed chunk markers on same date)
+        df = df[~df.index.duplicated(keep='first')]
+        df = df.reindex(full_index)
+        df.index.name = 'date'
+        df.reset_index(inplace=True)
     
     # Impute missing values with the requested 'Metode Resiprocal' (Inverse Distance Weighting)
     df['precipitation'] = fill_missing_reciprocal(df['precipitation'], power=1.0, window=14)

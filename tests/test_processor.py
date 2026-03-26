@@ -61,5 +61,18 @@ def test_validate_row_count_invalid_extra_dates():
     """Test validation with extra dates (row count mismatch)."""
     dates = pd.date_range(start='2023-01-01', end='2023-01-04') # 4 days
     df = pd.DataFrame({'date': dates, 'precipitation': [1, 2, 3, 4]})
-    # Expected 3 days
     assert validate_row_count(df, '2023-01-01', '2023-01-03') is False
+
+def test_fill_missing_reciprocal_max_gap():
+    """Test that IDW interpolator respects max_gap limit."""
+    from src.pipeline.processor import fill_missing_reciprocal
+    
+    # 2 days missing (<=3) should interpolate
+    s1 = pd.Series([10.0, np.nan, np.nan, 20.0])
+    res1 = fill_missing_reciprocal(s1, max_gap=3)
+    assert not res1.isna().any()
+    
+    # 4 days missing (>3) should NOT interpolate
+    s2 = pd.Series([10.0, np.nan, np.nan, np.nan, np.nan, 20.0])
+    res2 = fill_missing_reciprocal(s2, max_gap=3)
+    assert res2.isna().sum() == 4

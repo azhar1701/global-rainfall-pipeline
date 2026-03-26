@@ -31,7 +31,7 @@ def test_chirps_provider_get_rainfall_data(mock_ee):
     mock_ee.ImageCollection.assert_called_with("UCSB-CHG/CHIRPS/DAILY")
     mock_collection.filterBounds.assert_called_with(aoi)
     mock_collection.filterDate.assert_called_with(start_date, end_date)
-    assert mock_collection.map.call_count == 2
+    assert mock_collection.map.call_count == 1
     assert data == expected_data
 
 @patch("src.pipeline.providers.gpm.ee")

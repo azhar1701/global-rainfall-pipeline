@@ -15,6 +15,8 @@ class AOIConfig(BaseModel):
 class DateRangeConfig(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    chunk_days: int = 10
+    max_workers: int = 2  # Reduced default to prevent memory errors
 
 class ProviderConfig(BaseModel):
     collection: str
@@ -90,6 +92,14 @@ def load_config(config_path: str = "config.yaml") -> PipelineConfig:
     env_end_date = os.getenv("END_DATE")
     if env_end_date:
         config_data["date_range"]["end_date"] = env_end_date
+        
+    env_chunk_days = os.getenv("CHUNK_DAYS")
+    if env_chunk_days:
+        config_data["date_range"]["chunk_days"] = int(env_chunk_days)
+        
+    env_max_workers = os.getenv("MAX_WORKERS")
+    if env_max_workers:
+        config_data["date_range"]["max_workers"] = int(env_max_workers)
     
     # Timezone override
     env_timezone = os.getenv("TIMEZONE")

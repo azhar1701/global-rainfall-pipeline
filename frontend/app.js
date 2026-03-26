@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupFileInput();
     setupForm();
     setupDownload();
+    setupPresets();
 });
 
 // Setup Leaflet Map
@@ -210,10 +211,86 @@ async function handlePointSample(lat, lon) {
     }
 }
 
+// Workflow Step Management
+const WORKFLOW_STAGE_MAP = {
+    'parsing_aoi':             { step: 'aoi',     done: ['auth'] },
+    'initializing_providers':  { step: 'aoi',     done: ['auth'] },
+    'fetching_data':           { step: 'fetch',   done: ['auth', 'aoi'] },
+    'merging_results':         { step: 'process', done: ['auth', 'aoi', 'fetch'] },
+    'completed':               { step: 'done',    done: ['auth', 'aoi', 'fetch', 'process', 'analyze'] },
+};
+
+function updateWorkflowSteps(stage) {
+    const panel = document.getElementById('workflow-panel');
+    panel.classList.remove('hidden');
+
+    const steps = panel.querySelectorAll('.workflow-step');
+    const connectors = panel.querySelectorAll('.workflow-connector');
+
+    // Reset all
+    steps.forEach(s => { s.classList.remove('is-active', 'is-done', 'is-error'); });
+    connectors.forEach(c => c.classList.remove('is-done'));
+
+    // Map chunk stages to the fetch step
+    let mappedStage = stage;
+    if (stage && stage.startsWith('fetching_chunk_')) mappedStage = 'fetching_data';
+
+    const config = WORKFLOW_STAGE_MAP[mappedStage];
+    if (!config) {
+        // Default: show auth as active
+        const authStep = panel.querySelector('[data-step="auth"]');
+        if (authStep) authStep.classList.add('is-active');
+        return;
+    }
+
+    // Mark done steps
+    const stepOrder = ['auth', 'aoi', 'fetch', 'process', 'analyze', 'done'];
+    config.done.forEach(doneKey => {
+        const el = panel.querySelector(`[data-step="${doneKey}"]`);
+        if (el) el.classList.add('is-done');
+    });
+
+    // Mark done connectors (connectors follow steps)
+    const doneIdx = config.done.map(k => stepOrder.indexOf(k));
+    connectors.forEach((c, i) => {
+        if (doneIdx.includes(i)) c.classList.add('is-done');
+    });
+
+    // Mark active step
+    const activeEl = panel.querySelector(`[data-step="${config.step}"]`);
+    if (activeEl) activeEl.classList.add('is-active');
+}
+
+function setWorkflowError() {
+    const panel = document.getElementById('workflow-panel');
+    const steps = panel.querySelectorAll('.workflow-step');
+    // Find the currently active step and mark it as error
+    steps.forEach(s => {
+        if (s.classList.contains('is-active')) {
+            s.classList.remove('is-active');
+            s.classList.add('is-error');
+        }
+    });
+}
+
+function setWorkflowComplete() {
+    const panel = document.getElementById('workflow-panel');
+    const steps = panel.querySelectorAll('.workflow-step');
+    const connectors = panel.querySelectorAll('.workflow-connector');
+    steps.forEach(s => {
+        s.classList.remove('is-active', 'is-error');
+        s.classList.add('is-done');
+    });
+    connectors.forEach(c => c.classList.add('is-done'));
+}
+
 // Generalized Polling
 async function pollJobStatus(jobId, originalFormData) {
     const progressContainer = document.getElementById('progress-container');
     progressContainer.classList.remove('hidden');
+
+    // Show workflow panel and set initial state
+    updateWorkflowSteps(null);
 
     let isComplete = false;
     while (!isComplete) {
@@ -222,12 +299,15 @@ async function pollJobStatus(jobId, originalFormData) {
         const statusData = await resp.json();
 
         if (statusData.status === 'failed') {
+            setWorkflowError();
             throw new Error(statusData.error || "Job failed.");
         }
 
         updateProgress(statusData.progress || 0, statusData.stage || "Processing");
+        updateWorkflowSteps(statusData.stage);
 
         if (statusData.status === 'completed') {
+            setWorkflowComplete();
             window.lastJobId = jobId; // Store for export
             currentData = statusData.result;
             updateVisualizations(currentData, statusData.analytics, statusData.error);
@@ -249,7 +329,16 @@ function updateProgress(percent, stage, isError = false) {
     const pct = document.getElementById('progress-percent');
 
     inner.style.width = `${percent}%`;
-    label.textContent = stage.replace('_', ' ').toUpperCase();
+
+    let displayStage = stage.toUpperCase().replace(/_/g, ' ');
+    if (stage.startsWith('fetching_chunk_')) {
+        const parts = stage.split('_');
+        const current = parts[2];
+        const total = parts[3];
+        displayStage = `GATHERING DATA (${current}/${total})`;
+    }
+
+    label.textContent = displayStage;
     pct.textContent = `${percent}%`;
 
     if (isError) {
@@ -469,4 +558,43 @@ function formatDate(dateStr) {
 function formatDateFull(dateStr) {
     const d = new Date(dateStr);
     return d.toISOString().split('T')[0];
+}
+
+// Handle Quick Presets (Optimized: Auto-Run enabled)
+function setupPresets() {
+    const presetBtns = document.querySelectorAll('.btn-preset');
+    const startDateInput = document.getElementById('start_date');
+    const endDateInput = document.getElementById('end_date');
+    const form = document.getElementById('pipeline-form');
+
+    presetBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const days = parseInt(btn.dataset.days);
+            const end = new Date();
+            const start = new Date();
+
+            if (days >= 365) {
+                // Bulk year logic
+                start.setFullYear(end.getFullYear() - (days / 365));
+            } else {
+                start.setDate(end.getDate() - days);
+            }
+
+            startDateInput.value = start.toISOString().split('T')[0];
+            endDateInput.value = end.toISOString().split('T')[0];
+
+            presetBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            // AUTO-RUN if AOI is ready
+            const fileInput = document.getElementById('aoi_file');
+            if (fileInput.files.length > 0 || window.pointMarker) {
+                form.requestSubmit();
+            } else {
+                // Visual feedback that AOI is needed
+                document.getElementById('drop-area').classList.add('is-active');
+                setTimeout(() => document.getElementById('drop-area').classList.remove('is-active'), 1000);
+            }
+        });
+    });
 }

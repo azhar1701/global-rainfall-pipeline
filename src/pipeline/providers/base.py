@@ -1,6 +1,6 @@
 import ee
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Dict, List, Optional, Callable
 
 class BaseSatelliteProvider(ABC):
     """
@@ -8,7 +8,7 @@ class BaseSatelliteProvider(ABC):
     """
 
     @abstractmethod
-    def get_rainfall_data(self, aoi: ee.Geometry, start_date: str, end_date: str) -> List[Dict]:
+    def get_rainfall_data(self, aoi: ee.Geometry, start_date: str, end_date: str, progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict]:
         """
         Retrieves rainfall data for a given Area of Interest (AOI) and date range.
         

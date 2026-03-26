@@ -1,6 +1,6 @@
 import ee
 from .base import BaseSatelliteProvider
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from src.pipeline.client import GEEClient
@@ -16,23 +16,33 @@ class CHIRPSProvider(BaseSatelliteProvider):
         self.band = band
         self.client = client
 
-    def get_rainfall_data(self, aoi: ee.Geometry, start_date: str, end_date: str) -> Dict:
+    def get_rainfall_data(self, aoi: ee.Geometry, start_date: str, end_date: str, progress_callback: Optional[Callable[[int, int], None]] = None, _is_chunk: bool = False) -> Dict:
         """
         Retrieves CHIRPS rainfall data for a given AOI and date range.
         """
+        if self.client and not _is_chunk:
+            return self.client.fetch_in_chunks(
+                self, aoi, start_date, end_date, 
+                chunk_days=30, max_workers=8, 
+                progress_callback=progress_callback
+            )
+        
+        # Fallback for direct usage
         collection = ee.ImageCollection(self.collection_id) \
             .filterBounds(aoi) \
             .filterDate(start_date, end_date) \
-            .select(self.band) \
-            .map(lambda img: img.clip(aoi))
+            .select(self.band)
             
         def reduce_to_mean(image):
             # Perform Zonal Statistics (Mean Precipitation)
+            # reduceRegion is more efficient without a preceding clip()
             stats = image.reduceRegion(
                 reducer=ee.Reducer.mean(),
                 geometry=aoi,
-                scale=5566,  # ~0.05 degree resolution
-                bestEffort=True
+                scale=5566,  # ~0.05 degree resolution (CHIRPS native)
+                bestEffort=True,
+                maxPixels=1e9,
+                tileScale=4
             )
             return ee.Feature(None, stats).set('system:time_start', image.get('system:time_start'))
 

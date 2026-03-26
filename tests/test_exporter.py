@@ -31,14 +31,14 @@ class TestExporter:
 
 class TestCLI:
     @patch('src.pipeline.cli.load_config')
-    @patch('src.pipeline.cli.authenticate_gee')
     @patch('src.pipeline.cli.process_rainfall_data')
     @patch('src.pipeline.cli.export_data')
+    @patch('src.pipeline.cli.GEEClient')
     @patch('src.pipeline.cli.CHIRPSProvider')
     @patch('src.pipeline.cli.GPMProvider')
     @patch('src.pipeline.cli.load_aoi')
     @patch('sys.argv', ['pipeline', '--provider', 'chirps', '--start-date', '2020-01-01', '--end-date', '2020-01-02', '--output', 'out.csv', '--aoi', 'aoi.geojson'])
-    def test_cli_chirps_flow(self, mock_load_aoi, mock_gpm, mock_chirps, mock_export, mock_process, mock_auth, mock_config):
+    def test_cli_chirps_flow(self, mock_load_aoi, mock_gpm, mock_chirps, mock_gee, mock_export, mock_process, mock_config):
         # Setup mocks
         mock_config_instance = MagicMock()
         mock_config.return_value = mock_config_instance
@@ -60,21 +60,20 @@ class TestCLI:
 
         # Assertions
         mock_config.assert_called_once()
-        mock_auth.assert_called_once()
         mock_load_aoi.assert_called_once_with('aoi.geojson')
         mock_chirps.assert_called_once()
-        mock_provider_instance.get_rainfall_data.assert_called_once()
+        mock_gee.return_value.fetch_in_chunks.assert_called_once()
         mock_process.assert_called_once()
         mock_export.assert_called_once_with(mock_df, 'out.csv', 'csv')
 
     @patch('src.pipeline.cli.load_config')
-    @patch('src.pipeline.cli.authenticate_gee')
     @patch('src.pipeline.cli.process_rainfall_data')
     @patch('src.pipeline.cli.export_data')
+    @patch('src.pipeline.cli.GEEClient')
     @patch('src.pipeline.cli.GPMProvider')
     @patch('src.pipeline.cli.load_aoi')
     @patch('sys.argv', ['pipeline', '--provider', 'gpm', '--output', 'out.parquet', '--format', 'parquet', '--aoi', 'aoi.geojson', '--start-date', '2020-01-01', '--end-date', '2020-01-02'])
-    def test_cli_gpm_flow(self, mock_load_aoi, mock_gpm, mock_export, mock_process, mock_auth, mock_config):
+    def test_cli_gpm_flow(self, mock_load_aoi, mock_gpm, mock_gee, mock_export, mock_process, mock_config):
         # Setup mocks
         mock_config_instance = MagicMock()
         mock_config.return_value = mock_config_instance

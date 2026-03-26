@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import load_config
-from .auth import authenticate_gee
+from .client import GEEClient
 from .providers.chirps import CHIRPSProvider
 from .providers.gpm import GPMProvider
 from .processor import process_rainfall_data
@@ -75,24 +75,31 @@ def main():
             logger.error("Start and End dates are required (via args or config).")
             sys.exit(1)
 
-        # 3. Authenticate
-        authenticate_gee()
+        # 3. Initialize GEE Client (handles authentication internally)
+        client = GEEClient()
 
         # 4. Load AOI
         aoi = load_aoi(config.aoi.geojson_path)
 
         # 5. Get Provider
         if provider_name.lower() == 'chirps':
-            provider = CHIRPSProvider()
+            provider = CHIRPSProvider(client=client)
         elif provider_name.lower() == 'gpm':
-            provider = GPMProvider()
+            provider = GPMProvider(client=client)
         else:
             logger.error(f"Unknown provider: {provider_name}")
             sys.exit(1)
 
-        # 6. Fetch Data
+        # 6. Fetch Data (using efficient parallel chunking)
         logger.info(f"Fetching data from {provider_name} for {config.date_range.start_date} to {config.date_range.end_date}...")
-        raw_data = provider.get_rainfall_data(aoi, config.date_range.start_date, config.date_range.end_date)
+        raw_data = client.fetch_in_chunks(
+            provider=provider,
+            aoi=aoi,
+            start_date=config.date_range.start_date,
+            end_date=config.date_range.end_date,
+            chunk_days=config.date_range.chunk_days,
+            max_workers=config.date_range.max_workers
+        )
         
         # 7. Process Data
         logger.info("Processing data...")

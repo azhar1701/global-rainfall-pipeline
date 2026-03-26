@@ -16,8 +16,8 @@ def calculate_trend(df: pd.DataFrame, column: str = 'precipitation', min_points:
             'slope': 0.0
         }
 
-    # Prepare data (clean NaNs)
-    valid_data = df[column].dropna()
+    # Prepare data (clean NaNs and ensure numeric float type)
+    valid_data = df[column].dropna().astype(float)
     if len(valid_data) < min_points:
         return {
             'status': 'insufficient_data',
