@@ -2,6 +2,7 @@ from typing import Dict, List, Union, Optional
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from src.pipeline.analytics import calculate_spi
 
 def fill_missing_reciprocal(series: pd.Series, power: float = 1.0, window: int = 14, max_gap: int = 3) -> pd.Series:
     """
@@ -149,6 +150,9 @@ def process_rainfall_data(raw_data: Union[Dict, List[Dict]], start_date: Optiona
         df['z_score'] = 0.0
         
     df['is_anomaly'] = df['z_score'].abs() > 2.0
+    
+    # 3. SPI-30 (Standardized Precipitation Index)
+    df = calculate_spi(df, column='precipitation', window=30)
     
     return df
 

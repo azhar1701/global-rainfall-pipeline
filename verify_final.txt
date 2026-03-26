@@ -1,0 +1,9 @@
+Testing SPI Calculation...
+SPI Samples: [-0.1866861445273921, -1.6274461180239768, 0.23751319622772632, 0.2731439017433491, 0.03075654002213711]
+SPI Test Passed.
+
+Testing Ensemble Metrics...
+Metrics: {'status': 'success', 'rmsd': 0.26457513110645897, 'correlation': 0.9966980846161607, 'consistency_score': 0.9745134449111021, 'scientific_confidence': 'High'}
+Ensemble Metrics Test Passed.
+
+ALL ANALYTICS VERIFIED.

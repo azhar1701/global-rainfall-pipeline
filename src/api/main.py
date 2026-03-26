@@ -22,7 +22,7 @@ from src.pipeline.providers.chirps import CHIRPSProvider
 from src.pipeline.providers.gpm import GPMProvider
 from src.pipeline.processor import process_rainfall_data, fill_missing_reciprocal
 from src.pipeline.client import GEEClient
-from src.pipeline.analytics import calculate_trend
+from src.pipeline.analytics import calculate_trend, calculate_ensemble_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,11 @@ JOBS = {}
 
 def execute_pipeline(job_id: str, provider: str, start_date: str, end_date: str, aoi_data: dict):
     try:
+        # Cache context for export
+        JOBS[job_id]["_aoi"] = aoi_data
+        JOBS[job_id]["_provider_label"] = provider
+        JOBS[job_id]["_dates"] = (start_date, end_date)
+
         # Extract Geometry
         JOBS[job_id]["progress"] = 5
         JOBS[job_id]["stage"] = "parsing_aoi"
@@ -73,6 +78,10 @@ def execute_pipeline(job_id: str, provider: str, start_date: str, end_date: str,
         JOBS[job_id]["stage"] = "initializing_providers"
         
         client = get_gee_client()
+        
+        # Calculate internal fetch range (30-day lookback for SPI/Rolling warm-up)
+        original_start_dt = pd.to_datetime(start_date, utc=True)
+        fetch_start = (original_start_dt - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
         
         provider_map = {
             'chirps': CHIRPSProvider(client=client),
@@ -100,7 +109,7 @@ def execute_pipeline(job_id: str, provider: str, start_date: str, end_date: str,
         results_dfs = {}
         with ThreadPoolExecutor(max_workers=len(selected_providers)) as executor:
             future_to_provider = {
-                executor.submit(p_obj.get_rainfall_data, ee_geometry, start_date, end_date, progress_callback=progress_cb): p_name 
+                executor.submit(p_obj.get_rainfall_data, ee_geometry, fetch_start, end_date, progress_callback=progress_cb): p_name 
                 for p_name, p_obj in selected_providers
             }
             
@@ -112,21 +121,19 @@ def execute_pipeline(job_id: str, provider: str, start_date: str, end_date: str,
                         logger.warning(f"Provider {p_name} returned no images.")
                         continue
                         
-                    df = process_rainfall_data(raw_data, start_date=start_date, end_date=end_date, timezone="UTC")
-                    logger.info(f"Provider {p_name} returned {len(df)} rows.")
+                    # Process from fetch_start to allow rolling window warm-up
+                    df = process_rainfall_data(raw_data, start_date=fetch_start, end_date=end_date, timezone="UTC")
+                    logger.info(f"Provider {p_name} returned {len(df)} rows (with buffer).")
                     
-                    df['date'] = df['date'].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    df['date_str'] = df['date'].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
                     
-                    # Clean columns
-                    for col in ['precipitation', 'rolling_avg_7d', 'z_score']:
-                        if col in df.columns:
-                            df[col] = df[col].astype(object).where(pd.notna(df[col]), None)
-                    
+                    # Store original date string before cleaning for merge
                     if provider.lower() == 'both':
                         df = df.rename(columns={
                             'precipitation': f'precip_{p_name}',
                             'rolling_avg_7d': f'rolling_{p_name}',
-                            'is_anomaly': f'anomaly_{p_name}'
+                            'is_anomaly': f'anomaly_{p_name}',
+                            'spi_30': f'spi_30_{p_name}'
                         }).drop(columns=['z_score'], errors='ignore')
                     
                     results_dfs[p_name] = df
@@ -150,26 +157,53 @@ def execute_pipeline(job_id: str, provider: str, start_date: str, end_date: str,
             if merged_df is None:
                 merged_df = df
             else:
+                # Merge on the datetime object for precision
                 merged_df = pd.merge(merged_df, df, on='date', how='outer')
 
         if merged_df is not None:
-            logger.info(f"Merged DataFrame rows: {len(merged_df)}, columns: {list(merged_df.columns)}")
+            # Sort by date to ensure continuity
+            merged_df = merged_df.sort_values('date')
+            
+            logger.info(f"Buffered DataFrame rows: {len(merged_df)}")
 
-            # Run Trend Analysis on the numeric dataframe before string/object conversion
+            # CRITICAL: Slice back to original user range after analytical warm-up
+            merged_df = merged_df[merged_df['date'] >= original_start_dt].copy()
+            
+            logger.info(f"Final Merged DataFrame rows: {len(merged_df)}, columns: {list(merged_df.columns)}")
+
+            # Run Trend Analysis on the numeric dataframe before string conversion
             trend_results = {}
             if provider.lower() == 'both':
                 for p_name in results_dfs.keys():
                     p_col = f'precip_{p_name}'
                     trend_results[p_name] = calculate_trend(merged_df, column=p_col)
             else:
-                trend_results[provider.lower()] = calculate_trend(merged_df, column='precipitation')
+                target_provider = list(results_dfs.keys())[0]
+                trend_results[target_provider] = calculate_trend(merged_df, column='precipitation')
             
-            JOBS[job_id]["analytics"] = trend_results
+            def clean_for_json(obj):
+                if isinstance(obj, dict):
+                    return {k: clean_for_json(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [clean_for_json(i) for i in obj]
+                elif isinstance(obj, float) and (not np.isfinite(obj)):
+                    return None
+                return obj
+
+            JOBS[job_id]["analytics"] = clean_for_json(trend_results)
             
-            # Final Cleanup: Convert all NaNs to None for strict JSON compliance (JS JSON.parse fails on literal 'NaN')
+            # Run Ensemble Analysis if Both providers used
+            if provider.lower() == 'both':
+                ensemble_data = calculate_ensemble_metrics(merged_df, col_a='precip_chirps', col_b='precip_gpm')
+                JOBS[job_id]["ensemble"] = clean_for_json(ensemble_data)
+            
+            # Reformat date as ISO string for JSON serialization
+            merged_df['date'] = merged_df['date'].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            # Final Cleanup: Convert all NaNs to None for strict JSON compliance
             cleaned_df = merged_df.astype(object).where(pd.notna(merged_df), None)
             JOBS[job_id]["result"] = cleaned_df.to_dict(orient="records")
-            # Cache the original DF for export
+            # Cache the original DF for export (already formatted dates is fine)
             JOBS[job_id]["_df"] = merged_df
         else:
             JOBS[job_id]["result"] = []
@@ -287,13 +321,76 @@ async def export_job_data(job_id: str):
     return response
 
 
+@app.get("/api/jobs/{job_id}/geotiff")
+async def export_job_geotiff(job_id: str):
+    if job_id not in JOBS or "_aoi" not in JOBS[job_id]:
+        raise HTTPException(status_code=404, detail="Job spatial context not available.")
+    
+    try:
+        client = get_gee_client()
+        aoi_data = JOBS[job_id]["_aoi"]
+        start_date, end_date = JOBS[job_id]["_dates"]
+        provider_label = JOBS[job_id]["_provider_label"]
+        
+        # Recreate geometry
+        if aoi_data.get('type') == 'FeatureCollection':
+            geom = ee.Geometry(aoi_data['features'][0]['geometry'])
+        else:
+            geom = ee.Geometry(aoi_data)
+            
+        # Select dataset (default to CHIRPS if both)
+        p_name = 'ucsb-chg/chirps/daily'
+        if provider_label.lower() == 'gpm':
+            p_name = 'NASA/GPM_L3/IMERG_V07'
+            
+        img_col = ee.ImageCollection(p_name).filterDate(start_date, end_date).filterBounds(geom)
+        img_sum = img_col.select('precipitation').sum().clip(geom)
+        
+        content = client.download_image(img_sum, geom, scale=5000)
+        
+        return StreamingResponse(
+            iter([content]),
+            media_type="image/tiff",
+            headers={"Content-Disposition": f"attachment; filename=rainfall_spatial_{job_id}.tif"}
+        )
+    except Exception as e:
+        logger.error(f"GeoTIFF export failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@app.get("/api/hydrology/watershed")
+async def get_watershed(lat: float, lon: float, level: int = 7):
+    """
+    Returns the HydroSHEDS basin polygon containing the given coordinates.
+    Used for automated drainage basin selection.
+    """
+    try:
+        # Ensure GEE is initialized
+        try:
+            ee.Number(1).getInfo()
+        except Exception:
+            authenticate_gee()
+            
+        client = get_gee_client()
+        basin_feature = client.get_watershed_polygon(lat, lon, level=level)
+        
+        if not basin_feature:
+            raise HTTPException(status_code=404, detail="No watershed found at these coordinates.")
+            
+        return JSONResponse(content=basin_feature)
+    except Exception as e:
+        logger.error(f"Watershed extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Map layer tile generating endpoint
 @app.post("/api/map-layer")
 async def generate_map_layer(
     provider: str = Form(...),
     start_date: str = Form(...),
     end_date: str = Form(...),
-    aoi_file: UploadFile = File(...)
+    aoi_file: UploadFile = File(...),
+    layer_type: str = Form("precipitation")
 ):
     content = await aoi_file.read()
     try:
@@ -304,31 +401,51 @@ async def generate_map_layer(
     try:
         ee.Number(1).getInfo()
     except Exception:
-        # Re-attempt auth. If it fails, map overlay will just throw a normal error
         authenticate_gee()
         ee.Number(1).getInfo()
         
-    # Build MapId
-    # CHIRPS logic
-    ee_geometry = ee.Geometry(aoi_data.get('features', [{}])[0].get('geometry') if aoi_data.get('type') == 'FeatureCollection' else aoi_data['geometry'] if aoi_data.get('type') == 'Feature' else aoi_data)
+    # Extract Geometry
+    if aoi_data.get('type') == 'FeatureCollection':
+        ee_geometry = ee.Geometry(aoi_data['features'][0]['geometry'])
+    elif aoi_data.get('type') == 'Feature':
+        ee_geometry = ee.Geometry(aoi_data['geometry'])
+    else:
+        ee_geometry = ee.Geometry(aoi_data)
     
-    p_name = 'ucsb-chg/chirps/daily'
+    # 1. Handle Accuracy Layer request
+    if layer_type == "accuracy":
+        client = get_gee_client()
+        return client.get_accuracy_layer(ee_geometry, start_date, end_date)
+    
+    # 2. Handle standard Precipitation layer
+    p_id = 'UCSB-CHG/CHIRPS/DAILY'
     band = 'precipitation'
-    if provider.lower() == 'gpm' or provider.lower() == 'both':
-        p_name = 'NASA/GPM_L3/IMERG_V07'
-        band = 'precipitation'
+    
+    if provider.lower() in ['gpm', 'both']:
+        p_id = 'NASA/GPM_L3/IMERG_V07'
+        # GPM needs mean * 24 for daily rate if looking at raw imerg, 
+        # but GPM V07 daily collections often deliver high-res summaries.
+        # For map visualization, we use simple mean over period.
         
-    img_col = ee.ImageCollection(p_name).filterDate(start_date, end_date).filterBounds(ee_geometry)
-    img_sum = img_col.select(band).sum().clip(ee_geometry)
+    img_col = ee.ImageCollection(p_id).filterDate(start_date, end_date).filterBounds(ee_geometry)
     
-    # Calculate palette
-    vis_params = {
-        'min': 0,
-        'max': 100, # arbitrarily limit color scale max to 100mm
-        'palette': ['#000000', '#0000FF', '#00FFFF', '#00FF00', '#00FF00', '#FFFF00', '#FF0000']
-    }
+    # Spatial Vis
+    if provider.lower() in ['gpm', 'both']:
+        # GPM IMERG is precipitation rate. We mean it over the period.
+        img_vis = img_col.select('precipitation').mean().clip(ee_geometry)
+        vis_params = {
+            'min': 0, 'max': 5, 
+            'palette': ['#000033', '#0000FF', '#00FFFF', '#00FF00', '#FFFF00', '#FF0000']
+        }
+    else:
+        # CHIRPS is daily total. we mean it over the period for normalized map.
+        img_vis = img_col.select('precipitation').mean().clip(ee_geometry)
+        vis_params = {
+            'min': 0, 'max': 5,
+            'palette': ['#000033', '#0000FF', '#00FFFF', '#00FF00', '#FFFF00', '#FF0000']
+        }
     
-    map_id = img_sum.getMapId(vis_params)
+    map_id = img_vis.getMapId(vis_params)
     return {"url": map_id['tile_fetcher'].url_format}
 
 

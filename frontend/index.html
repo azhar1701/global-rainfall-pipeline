@@ -87,8 +87,18 @@
                         <div class="file-drop-area" id="drop-area" role="button" aria-controls="aoi_file">
                             <span class="file-msg">Upload .geojson or drag & drop</span>
                             <input class="file-input" type="file" id="aoi_file" name="aoi_file"
-                                accept=".geojson,application/geo+json" required aria-required="true">
+                                accept=".geojson,application/geo+json"
+                                aria-label="Area of Interest GeoJSON File Upload">
                         </div>
+                        <button type="button" id="detect-watershed-btn" class="btn-secondary"
+                            style="margin-top: 0.75rem; width: 100%;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" style="margin-right: 8px; vertical-align: text-bottom;">
+                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                                <circle cx="12" cy="10" r="3"></circle>
+                            </svg>
+                            Detect Basin from Point
+                        </button>
                     </div>
 
                     <button type="submit" id="submit-btn" class="btn-cta">
@@ -133,7 +143,7 @@
                             </div>
                             <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-connector" aria-hidden="true" role="presentation"></div>
 
                         <div class="workflow-step" data-step="aoi" role="listitem">
                             <div class="step-icon" aria-hidden="true">
@@ -150,7 +160,7 @@
                             </div>
                             <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-connector" aria-hidden="true" role="presentation"></div>
 
                         <div class="workflow-step" data-step="fetch" role="listitem">
                             <div class="step-icon" aria-hidden="true">
@@ -165,7 +175,7 @@
                             </div>
                             <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-connector" aria-hidden="true" role="presentation"></div>
 
                         <div class="workflow-step" data-step="process" role="listitem">
                             <div class="step-icon" aria-hidden="true">
@@ -182,7 +192,7 @@
                             </div>
                             <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-connector" aria-hidden="true" role="presentation"></div>
 
                         <div class="workflow-step" data-step="analyze" role="listitem">
                             <div class="step-icon" aria-hidden="true">
@@ -199,7 +209,7 @@
                             </div>
                             <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector" aria-hidden="true"></div>
+                        <div class="workflow-connector" aria-hidden="true" role="presentation"></div>
 
                         <div class="workflow-step" data-step="done" role="listitem">
                             <div class="step-icon" aria-hidden="true">
@@ -239,12 +249,80 @@
                     </div>
                 </div>
 
+                <!-- Hydrological Expert Context (Conditional) -->
+                <div id="hydro-context" class="hydro-context glass-card hidden" role="region"
+                    aria-label="Scientific Context">
+                    <div class="map-header">
+                        <h2 class="section-title">Scientific Confidence Report</h2>
+                        <span id="confidence-grade" class="confidence-grade">--</span>
+                    </div>
+                    <div class="ensemble-metrics">
+                        <div class="ensemble-item">
+                            <span class="label">Composite Score <i class="fas fa-info-circle info-tool"
+                                    data-tooltip="Weighted composite of all 5 scientific metrics."></i></span>
+                            <span id="ensemble-confidence" class="value confidence-badge">--</span>
+                        </div>
+                        <div class="ensemble-item">
+                            <span class="label">Correlation (R) <i class="fas fa-info-circle info-tool"
+                                    data-tooltip="Pearson R — measures temporal pattern sync between sensors."></i></span>
+                            <span id="ensemble-corr" class="value font-data">--</span>
+                        </div>
+                        <div class="ensemble-item">
+                            <span class="label">RMS Discrepancy <i class="fas fa-info-circle info-tool"
+                                    data-tooltip="Root Mean Square Difference — average magnitude of disagreement."></i></span>
+                            <span id="ensemble-rmsd" class="value font-data">-- mm</span>
+                        </div>
+                        <div class="ensemble-item">
+                            <span class="label">Nash-Sutcliffe (NSE) <i class="fas fa-info-circle info-tool"
+                                    data-tooltip="Standard benchmark for predictive skill in hydrology."></i></span>
+                            <span id="ensemble-nse" class="value font-data">--</span>
+                        </div>
+                        <div class="ensemble-item">
+                            <span class="label">Bias Ratio <i class="fas fa-info-circle info-tool"
+                                    data-tooltip="Ratio of total rainfall volumes. ~1.0 is ideal."></i></span>
+                            <span id="ensemble-bias" class="value font-data">--</span>
+                        </div>
+                        <div class="ensemble-item">
+                            <span class="label">Wet-Day Match <i class="fas fa-info-circle info-tool"
+                                    data-tooltip="How often sensors agree on 'it rained vs it didn't'."></i></span>
+                            <span id="ensemble-pod" class="value font-data">--</span>
+                        </div>
+                    </div>
+                    <div id="confidence-explainer" class="confidence-explainer"></div>
+                </div>
+
                 <!-- Map & Chart Split -->
                 <div class="vis-split">
                     <!-- Map -->
                     <div class="map-container glass-card" role="region" aria-label="Spatial Preview">
-                        <h2 class="section-title">Geographic Context</h2>
-                        <div id="map" aria-label="Interactive map showing area of interest"></div>
+                        <div class="map-header">
+                            <h2 class="section-title">Geographic Context</h2>
+                            <div class="map-controls">
+                                <select id="map-layer-select" class="layer-selector">
+                                    <option value="precipitation">Precipitation Intensity</option>
+                                    <option value="accuracy">Scientific Accuracy (GPM vs CHIRPS)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="map-wrapper">
+                            <div id="map" aria-label="Hydrological spatial map overview" role="application"
+                                style="height: 400px; width: 100%;"></div>
+                            <div id="accuracy-legend" class="hidden accuracy-legend">
+                                <span class="legend-title">Spatial Discrepancy (mm/d)</span>
+                                <div class="legend-scale">
+                                    <div class="scale-bar"></div>
+                                    <div class="scale-labels">
+                                        <span>High Match</span>
+                                        <span>Uncertain</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="accuracy-insight" class="hidden accuracy-insight">
+                            <p>🔬 <strong>Scientific Note:</strong> Red zones indicate areas where GPM (Satellite) and
+                                CHIRPS (Infrared + Station) diverge. Common in mountainous terrain or during extreme
+                                convective storms.</p>
+                        </div>
                     </div>
 
                     <!-- Chart -->
@@ -252,7 +330,7 @@
                         <h2 class="section-title" id="chart-title">Rainfall Trends</h2>
                         <div class="chart-wrapper">
                             <div id="rainfallChart" style="width: 100%; height: 100%;"
-                                aria-label="Interactive rainfall time-series chart"></div>
+                                aria-label="Time-series analysis chart of precipitation trends" role="img"></div>
                         </div>
                     </div>
                 </div>
@@ -261,8 +339,12 @@
                 <div class="data-table-container glass-card" role="region" aria-label="Raw Data Export">
                     <div class="table-header">
                         <h2 class="section-title">Extracted Data</h2>
-                        <button id="download-btn" class="btn-secondary" disabled aria-label="Download CSV data">Download
-                            CSV</button>
+                        <div class="header-actions">
+                            <button id="download-btn" class="btn-secondary" disabled
+                                aria-label="Download CSV data">CSV</button>
+                            <button id="download-geotiff-btn" class="btn-secondary" disabled
+                                aria-label="Download GeoTIFF">GeoTIFF</button>
+                        </div>
                     </div>
                     <div class="table-scroll">
                         <table id="data-table" aria-describedby="table-info">

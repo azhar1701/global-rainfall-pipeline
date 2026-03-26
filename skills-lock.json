@@ -21,6 +21,11 @@
       "sourceType": "github",
       "computedHash": "7530d83ce078667b49d4f57fb9d6d81d222189da83925c6cf660374ec0032747"
     },
+    "harden": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "computedHash": "47273e366f900b19ae795460bc7f565bccd8c6c40659a33f24630fa29c7f2251"
+    },
     "normalize": {
       "source": "pbakaus/impeccable",
       "sourceType": "github",
@@ -30,6 +35,11 @@
       "source": "pbakaus/impeccable",
       "sourceType": "github",
       "computedHash": "2bf9726227fcfc9fdaf14799574feb3c551994146eb50bb4fecae45ace425eff"
+    },
+    "polish": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "computedHash": "8c5a862f8eef92a12b5e38a81e10f1c0998adf6559beb5b9b91e7bbbe54e3fef"
     },
     "teach-impeccable": {
       "source": "pbakaus/impeccable",

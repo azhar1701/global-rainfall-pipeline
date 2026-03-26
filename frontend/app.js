@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupForm();
     setupDownload();
     setupPresets();
+    setupWatershed();
 });
 
 // Helper to get CSS variable values
@@ -57,7 +58,10 @@ function initChart() {
             containLabel: true
         },
         xAxis: { type: 'category', boundaryGap: false, data: [] },
-        yAxis: { type: 'value', name: 'mm / day', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } },
+        yAxis: [
+            { type: 'value', name: 'Rainfall (mm)', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } },
+            { type: 'value', name: 'SPI Index', min: -3, max: 3, splitLine: { show: false } }
+        ],
         series: []
     };
 
@@ -117,10 +121,10 @@ function setupFileInput() {
 
                 geojsonLayer = L.geoJSON(geojson, {
                     style: {
-                        color: '#14B8A6',
+                        color: getThemeColor('--color-teal'),
                         weight: 2,
                         opacity: 0.8,
-                        fillColor: '#14B8A6',
+                        fillColor: getThemeColor('--color-teal'),
                         fillOpacity: 0.2
                     }
                 }).addTo(map);
@@ -151,8 +155,27 @@ function setupForm() {
         btnText.textContent = "Processing...";
         spinner.classList.remove('hidden');
         document.getElementById('download-btn').disabled = true;
+        document.getElementById('download-geotiff-btn').disabled = true;
 
         const formData = new FormData(form);
+
+        // If a detected basin exists and no file is selected, inject basin as AOI
+        const fileInput = document.getElementById('aoi_file');
+        let activeAoiBlob = null;
+
+        if (fileInput.files.length > 0) {
+            activeAoiBlob = fileInput.files[0];
+        } else if (window.detectedBasin) {
+            activeAoiBlob = new Blob([JSON.stringify(window.detectedBasin)], { type: 'application/json' });
+            formData.set('aoi_file', activeAoiBlob, 'watershed_basin.geojson');
+        } else if (window.pointMarker) {
+            const pt = window.pointMarker.getLatLng();
+            const ptGeoJSON = { type: "Point", coordinates: [pt.lng, pt.lat] };
+            activeAoiBlob = new Blob([JSON.stringify(ptGeoJSON)], { type: 'application/json' });
+            formData.set('aoi_file', activeAoiBlob, 'point.geojson');
+        }
+
+        window.currentAoiBlob = activeAoiBlob;
 
         try {
             // Call FastAPI Backend to start Job
@@ -168,6 +191,9 @@ function setupForm() {
 
             const { job_id } = await response.json();
             await pollJobStatus(job_id, formData);
+
+            // Auto-load map layer after success
+            updateMapLayer();
 
         } catch (error) {
             console.error("Pipeline Error:", error);
@@ -210,11 +236,74 @@ async function handlePointSample(lat, lon) {
         if (window.pointMarker) map.removeLayer(window.pointMarker);
         window.pointMarker = L.marker([lat, lon]).addTo(map).bindPopup("Sampling Point...").openPopup();
 
+        // Store point as active AOI for map layer switching
+        const ptGeoJSON = { type: "Point", coordinates: [lon, lat] };
+        window.currentAoiBlob = new Blob([JSON.stringify(ptGeoJSON)], { type: 'application/json' });
+
         await pollJobStatus(job_id, null);
+        updateMapLayer();
     } catch (err) {
         showError(err.message);
     }
 }
+
+// Real-time Map Layer Switcher
+async function updateMapLayer() {
+    const provider = document.getElementById('provider').value;
+    const start_date = document.getElementById('start_date').value;
+    const end_date = document.getElementById('end_date').value;
+    const layer_select = document.getElementById('map-layer-select');
+    const layer_type = layer_select ? layer_select.value : "precipitation";
+    const legend = document.getElementById('accuracy-legend');
+    const insight = document.getElementById('accuracy-insight');
+    const mapTitle = document.querySelector('.map-header .section-title');
+
+    // Toggle accuracy overlays
+    const isAccuracy = layer_type === 'accuracy';
+    if (legend) legend.classList.toggle('hidden', !isAccuracy);
+    if (insight) insight.classList.toggle('hidden', !isAccuracy);
+    if (mapTitle) mapTitle.textContent = isAccuracy ? 'Spatial Uncertainty Analysis' : 'Geographic Context';
+
+    // Safety checks
+    if (!window.currentAoiBlob || !start_date || !end_date) return;
+
+    const formData = new FormData();
+    formData.append('provider', provider);
+    formData.append('start_date', start_date);
+    formData.append('end_date', end_date);
+    formData.append('aoi_file', window.currentAoiBlob, 'aoi.json');
+    formData.append('layer_type', layer_type);
+
+    try {
+        const response = await fetch('/api/map-layer', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) throw new Error("Failed to fetch Map ID");
+
+        const data = await response.json();
+
+        // Clear previous EE layer
+        if (window.currentEEMapLayer) map.removeLayer(window.currentEEMapLayer);
+
+        window.currentEEMapLayer = L.tileLayer(data.url, {
+            attribution: 'Google Earth Engine',
+            opacity: 0.8
+        }).addTo(map);
+
+    } catch (err) {
+        console.error("Map Layer error:", err);
+    }
+}
+
+// Add event listener for layer selector
+document.addEventListener('DOMContentLoaded', () => {
+    const layerSelect = document.getElementById('map-layer-select');
+    if (layerSelect) {
+        layerSelect.addEventListener('change', updateMapLayer);
+    }
+});
 
 // Workflow Step Management
 const WORKFLOW_STAGE_MAP = {
@@ -315,8 +404,14 @@ async function pollJobStatus(jobId, originalFormData) {
             setWorkflowComplete();
             window.lastJobId = jobId; // Store for export
             currentData = statusData.result;
-            updateVisualizations(currentData, statusData.analytics, statusData.error);
+            updateVisualizations(currentData, statusData.analytics, statusData.ensemble, statusData.error);
             isComplete = true;
+
+            const provider = document.getElementById('provider').value;
+            if (provider.toLowerCase() === 'both') {
+                const layerSelect = document.getElementById('map-layer-select');
+                if (layerSelect) layerSelect.value = 'accuracy';
+            }
 
             // Load map layer ONLY if we have originalFormData (meaning it's not a point sample)
             if (originalFormData) {
@@ -347,7 +442,10 @@ function updateProgress(percent, stage, isError = false) {
     pct.textContent = `${percent}%`;
 
     if (isError) {
-        inner.style.background = '#EF4444';
+        inner.style.background = getThemeColor('--color-error');
+    } else if (percent >= 100) {
+        inner.style.background = getThemeColor('--color-success');
+        label.textContent = 'READY';
     } else {
         inner.style.background = 'var(--primary-color)';
     }
@@ -374,9 +472,15 @@ async function loadMapOverlay(formData) {
     } catch (e) { console.warn(e); }
 }
 
-function updateVisualizations(data, analytics, errorMsg) {
-    if (errorMsg) {
-        showError(errorMsg);
+async function updateVisualizations(data, analytics, ensemble, error) {
+    console.log("Updating Visualizations. Ensemble data:", ensemble);
+
+    // Clear previous errors
+    const errorEl = document.getElementById('pipeline-error');
+    if (errorEl) errorEl.classList.add('hidden');
+
+    if (error) {
+        showError(error);
         return;
     }
 
@@ -411,8 +515,115 @@ function updateVisualizations(data, analytics, errorMsg) {
         const trend = analytics[firstKey];
         if (trend.status === 'success') {
             const teal = getThemeColor('--color-teal');
-            chartTitle.innerHTML = `Time Series Analysis <span style="font-size:0.75rem; color:${teal}">(Trend: ${trend.trend})</span>`;
+            chartTitle.innerHTML = `Hydro-Analysis <span style="font-size:0.75rem; color:${teal}">(Trend: ${trend.trend})</span>`;
         }
+    }
+
+    // Update Ensemble Context
+    const hydroPanel = document.getElementById('hydro-context');
+    console.log("Ensemble block start. hydroPanel:", hydroPanel, "ensemble?.status:", ensemble?.status);
+
+    if (ensemble && ensemble.status === 'success') {
+        hydroPanel.classList.remove('hidden');
+
+        const confidence = ensemble.scientific_confidence;
+        const grade = ensemble.grade || '?';
+        const composite = ensemble.composite_score || ensemble.consistency_score || 0;
+        const rmsd = ensemble.rmsd;
+        const corr = ensemble.correlation;
+        const metrics = ensemble.metrics || {};
+        const insightsResults = ensemble.insights || [];
+
+        // Grade badge in header
+        const gradeEl = document.getElementById('confidence-grade');
+        if (gradeEl) {
+            gradeEl.textContent = grade;
+            gradeEl.className = 'confidence-grade';
+            if (composite >= 0.85) gradeEl.classList.add('grade-a');
+            else if (composite >= 0.70) gradeEl.classList.add('grade-b');
+            else if (composite >= 0.50) gradeEl.classList.add('grade-c');
+            else gradeEl.classList.add('grade-d');
+        }
+
+        // Composite Score badge
+        const badge = document.getElementById('ensemble-confidence');
+        badge.textContent = `${(composite * 100).toFixed(0)}% — ${confidence}`;
+        badge.classList.remove('confidence-high', 'confidence-medium', 'confidence-low');
+        if (composite >= 0.70) badge.classList.add('confidence-high');
+        else if (composite >= 0.50) badge.classList.add('confidence-medium');
+        else badge.classList.add('confidence-low');
+
+        // Correlation with gauge
+        const corrEl = document.getElementById('ensemble-corr');
+        const corrPct = Math.max(0, Math.min(100, Math.abs(corr) * 100));
+        const corrColor = corr > 0.8 ? getThemeColor('--color-success') : corr > 0.5 ? getThemeColor('--color-warning') : getThemeColor('--color-error');
+        corrEl.innerHTML = `
+            <span style="color:${corrColor}">${corr.toFixed(2)}</span>
+            <div style="width:100%;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:6px;overflow:hidden">
+                <div style="width:${corrPct}%;height:100%;background:${corrColor};border-radius:2px;transition:width 0.6s ease"></div>
+            </div>`;
+
+        // RMSD
+        const rmsdEl = document.getElementById('ensemble-rmsd');
+        rmsdEl.textContent = `${rmsd.toFixed(2)} mm`;
+        rmsdEl.style.color = rmsd < 5 ? getThemeColor('--color-success') : rmsd < 10 ? getThemeColor('--color-warning') : getThemeColor('--color-error');
+
+        // NSE
+        const nseEl = document.getElementById('ensemble-nse');
+        if (nseEl && metrics.nse) {
+            const nseVal = metrics.nse.value;
+            const nseColor = nseVal >= 0.75 ? getThemeColor('--color-success') : nseVal >= 0.36 ? getThemeColor('--color-warning') : getThemeColor('--color-error');
+            nseEl.innerHTML = `<span style="color:${nseColor}">${nseVal.toFixed(2)}</span>`;
+        }
+
+        // Bias Ratio
+        const biasEl = document.getElementById('ensemble-bias');
+        if (biasEl && metrics.bias_ratio) {
+            const biasVal = metrics.bias_ratio.value;
+            const biasColor = (biasVal >= 0.9 && biasVal <= 1.1) ? getThemeColor('--color-success') : getThemeColor('--color-warning');
+            biasEl.innerHTML = `<span style="color:${biasColor}">${biasVal.toFixed(2)}</span>`;
+        }
+
+        // Wet-Day Match (POD)
+        const podEl = document.getElementById('ensemble-pod');
+        if (podEl && metrics.pod) {
+            const podVal = metrics.pod.value;
+            const podColor = podVal >= 0.8 ? getThemeColor('--color-success') : podVal >= 0.5 ? getThemeColor('--color-warning') : getThemeColor('--color-error');
+            podEl.innerHTML = `<span style="color:${podColor}">${(podVal * 100).toFixed(0)}%</span>`;
+        }
+
+        // Render Explainer with Icons
+        const explainerEl = document.getElementById('confidence-explainer');
+        if (explainerEl && ensemble.explainer) {
+            const sentences = ensemble.explainer.split(' | ');
+            explainerEl.innerHTML = sentences.map((s, i) => {
+                if (i === 0) {
+                    return `<div class="explainer-header">
+                        <i class="fas fa-stethoscope"></i> ${s}
+                    </div>`;
+                }
+
+                // Determine icon based on metric/content
+                let icon = '<i class="fas fa-chevron-right explainer-icon"></i>';
+                if (s.includes('R=')) icon = '<i class="fas fa-sync-alt explainer-icon"></i>';
+                if (s.includes('RMSD=')) icon = '<i class="fas fa-ruler-combined explainer-icon"></i>';
+                if (s.includes('Bias=')) icon = '<i class="fas fa-balance-scale explainer-icon"></i>';
+                if (s.includes('NSE=')) icon = '<i class="fas fa-bullseye explainer-icon"></i>';
+                if (s.includes('Match=')) icon = '<i class="fas fa-check-double explainer-icon"></i>';
+
+                // Add color cues to sentences
+                let colorClass = '';
+                if (s.toLowerCase().includes('excellent') || s.toLowerCase().includes('strong') || s.toLowerCase().includes('very low') || s.toLowerCase().includes('no systematic')) {
+                    colorClass = 'text-green-400';
+                }
+
+                return `<div class="explainer-line ${colorClass}">
+                    ${icon} <span>${s}</span>
+                </div>`;
+            }).join('');
+        }
+    } else {
+        hydroPanel.classList.add('hidden');
     }
 
     // 2. Update ECharts
@@ -461,23 +672,47 @@ function updateVisualizations(data, analytics, errorMsg) {
                 name: '7-Day Avg',
                 type: 'line',
                 data: data.map(d => d.rolling_avg_7d),
-                lineStyle: { type: 'dashed' },
+                lineStyle: { type: 'dashed', opacity: 0.5 },
                 itemStyle: { color: getThemeColor('--color-teal') },
                 symbol: 'none'
+            },
+            {
+                name: 'SPI-30',
+                type: 'line',
+                yAxisIndex: 1,
+                data: data.map(d => d.spi_30),
+                itemStyle: { color: getThemeColor('--color-cta') },
+                smooth: true,
+                lineStyle: { width: 1, opacity: 0.8 }
             }
         ];
     }
 
     chartInstance.setOption({
         legend: {
-            data: isBoth ? ['CHIRPS', 'GPM'] : ['Precipitation', '7-Day Avg'],
-            top: 0
+            data: isBoth ? ['CHIRPS', 'GPM'] : ['Precipitation', '7-Day Avg', 'SPI-30'],
+            top: 0,
+            textStyle: { color: 'rgba(255,255,255,0.7)' }
         },
         xAxis: { data: dates },
+        yAxis: [
+            {
+                type: 'value',
+                name: 'Precip (mm)',
+                axisLabel: { color: 'rgba(255,255,255,0.7)' },
+                splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
+            },
+            {
+                type: 'value',
+                name: 'SPI',
+                min: -3, max: 3,
+                axisLabel: { color: 'rgba(255,255,255,0.7)' },
+                splitLine: { show: false }
+            }
+        ],
         series: series
     });
 
-    // Final resize to ensure it fits the container after data load
     setTimeout(() => chartInstance.resize(), 100);
 
     // 3. Update Table
@@ -487,14 +722,13 @@ function updateVisualizations(data, analytics, errorMsg) {
     if (isBoth) {
         thead.innerHTML = `<th>Date (UTC)</th><th>CHIRPS (mm)</th><th>GPM (mm)</th>`;
     } else {
-        thead.innerHTML = `<th>Date (UTC)</th><th>Precipitation (mm)</th>`;
+        thead.innerHTML = `<th>Date (UTC)</th><th>Precip (mm)</th><th>SPI-30</th>`;
     }
 
     tbody.innerHTML = '';
-
+    const fragment = document.createDocumentFragment();
     data.forEach(row => {
         const tr = document.createElement('tr');
-
         const tdDate = document.createElement('td');
         tdDate.className = 'font-data';
         tdDate.textContent = formatDateFull(row.date);
@@ -503,43 +737,46 @@ function updateVisualizations(data, analytics, errorMsg) {
         if (isBoth) {
             const tdChirps = document.createElement('td');
             tdChirps.className = 'font-data';
-            tdChirps.innerHTML = (row.precip_chirps === null ? '<span class="text-muted">NaN</span>' : row.precip_chirps.toFixed(3)) + (row.anomaly_chirps ? ' <span style="color:#EF4444">⚠️</span>' : '');
-
+            tdChirps.innerHTML = (row.precip_chirps === null ? 'NaN' : row.precip_chirps.toFixed(3)) + (row.anomaly_chirps ? ' ⚠️' : '');
             const tdGpm = document.createElement('td');
             tdGpm.className = 'font-data';
-            tdGpm.innerHTML = (row.precip_gpm === null ? '<span class="text-muted">NaN</span>' : row.precip_gpm.toFixed(3)) + (row.anomaly_gpm ? ' <span style="color:#EF4444">⚠️</span>' : '');
-
+            tdGpm.innerHTML = (row.precip_gpm === null ? 'NaN' : row.precip_gpm.toFixed(3)) + (row.anomaly_gpm ? ' ⚠️' : '');
             tr.appendChild(tdChirps);
             tr.appendChild(tdGpm);
         } else {
             const tdPrecip = document.createElement('td');
             tdPrecip.className = 'font-data';
-            if (row.precipitation === null || isNaN(row.precipitation)) {
-                tdPrecip.innerHTML = '<span class="text-muted">NaN</span>';
-            } else {
-                let val = row.precipitation.toFixed(3);
-                if (row.is_anomaly) val += ' <span style="color:#EF4444">⚠️</span>';
-                tdPrecip.innerHTML = val;
-            }
+            tdPrecip.innerHTML = (row.precipitation === null ? 'NaN' : row.precipitation.toFixed(3)) + (row.is_anomaly ? ' ⚠️' : '');
+            const tdSPI = document.createElement('td');
+            tdSPI.className = 'font-data';
+            tdSPI.textContent = row.spi_30 ? row.spi_30.toFixed(2) : '-';
             tr.appendChild(tdPrecip);
+            tr.appendChild(tdSPI);
         }
-
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
     });
+    tbody.appendChild(fragment);
 
-    // Enable Download
     document.getElementById('download-btn').disabled = false;
+    document.getElementById('download-geotiff-btn').disabled = false;
 }
 
 function setupDownload() {
     const btn = document.getElementById('download-btn');
     btn.addEventListener('click', () => {
-        // Use the new backend export endpoint
-        // Extract jobId from recent polling (needs to be stored)
         if (window.lastJobId) {
             window.open(`/api/jobs/${window.lastJobId}/export`, '_blank');
         } else {
             alert("No job data available to export yet.");
+        }
+    });
+
+    const geotiffBtn = document.getElementById('download-geotiff-btn');
+    geotiffBtn.addEventListener('click', () => {
+        if (window.lastJobId) {
+            window.open(`/api/jobs/${window.lastJobId}/geotiff`, '_blank');
+        } else {
+            alert("No spatial context available to export yet.");
         }
     });
 }
@@ -602,5 +839,57 @@ function setupPresets() {
                 setTimeout(() => document.getElementById('drop-area').classList.remove('is-active'), 1000);
             }
         });
+    });
+}
+
+function setupWatershed() {
+    const btn = document.getElementById('detect-watershed-btn');
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+        if (!window.pointMarker) {
+            showError("Please click on the map first to set a sampling point.");
+            return;
+        }
+
+        const pt = window.pointMarker.getLatLng();
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner inline-block" style="width:12px;height:12px;border-width:2px;margin-right:8px;"></span>Detecting Basin...';
+        hideError();
+
+        try {
+            const resp = await fetch(`/api/hydrology/watershed?lat=${pt.lat}&lon=${pt.lng}`);
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || "Could not find a watershed basin at this location.");
+            }
+
+            const basin = await resp.json();
+            window.detectedBasin = basin;
+
+            // Visualize on map
+            if (geojsonLayer) map.removeLayer(geojsonLayer);
+            geojsonLayer = L.geoJSON(basin, {
+                style: {
+                    color: getThemeColor('--color-primary'),
+                    weight: 3,
+                    opacity: 0.9,
+                    fillColor: getThemeColor('--color-primary'),
+                    fillOpacity: 0.3
+                }
+            }).addTo(map);
+
+            map.fitBounds(geojsonLayer.getBounds(), { padding: [30, 30] });
+
+            // Success feedback
+            btn.textContent = "Basin Connected ✔";
+            document.querySelector('.file-msg').textContent = "Watershed Basin Loaded";
+
+        } catch (err) {
+            showError(err.message);
+            btn.textContent = "Detect Basin from Point";
+        } finally {
+            btn.disabled = false;
+        }
     });
 }

@@ -1,0 +1,6 @@
+Testing SPI Calculation...
+SPI Samples: [-0.5772869192015664, 0.28098410876595964, 1.6065138340870941, -1.0139758372341139, 2.3094862391534576]
+SPI Test Passed.
+
+Testing Ensemble Metrics...
+VERIFICATION FAILED: unhashable type: 'DataFrame'

@@ -138,3 +138,81 @@ class GEEClient:
 
         # Wrap the merged features back into a GEE-like structure
         return {"type": "FeatureCollection", "features": all_results}
+    def get_download_url(self, image: ee.Image, aoi: ee.Geometry, scale: float = 5000, crs: str = 'EPSG:4326') -> str:
+        """
+        Generates a download URL for an ee.Image as a GeoTIFF.
+        """
+        return self.execute_with_retry(
+            image.getDownloadURL,
+            {
+                'scale': scale,
+                'crs': crs,
+                'region': aoi,
+                'format': 'GEO_TIFF'
+            }
+        )
+
+    def download_image(self, image: ee.Image, aoi: ee.Geometry, scale: float = 5000) -> bytes:
+        """
+        Downloads an ee.Image content directly as bytes.
+        """
+        url = self.get_download_url(image, aoi, scale=scale)
+        import requests
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response.content
+
+    def get_watershed_polygon(self, lat: float, lon: float, level: int = 7) -> Optional[Dict]:
+        """
+        Retrieves the HydroSHEDS basin polygon containing the given coordinates.
+        """
+        try:
+            point = ee.Geometry.Point([lon, lat])
+            basins = ee.FeatureCollection(f'WWF/HydroSHEDS/v1/Basins/hybas_{level}')
+            
+            # Filter to find the basin containing the point
+            basin = basins.filterBounds(point).first()
+            
+            # Check if we actually found a basin
+            info = self.get_info(basin)
+            if not info or 'geometry' not in info:
+                return None
+                
+            return info
+        except Exception as e:
+            logger.error(f"Failed to extract watershed: {e}")
+            return None
+    def get_accuracy_layer(self, aoi: ee.Geometry, start_date: str, end_date: str) -> Dict[str, str]:
+        """
+        Calculates spatial discrepancy (error proxy) between GPM and CHIRPS.
+        Returns a tile URL for the Accuracy/Uncertainty heatmap.
+        """
+        try:
+            # Load Collections for the requested period
+            gpm_coll = ee.ImageCollection("NASA/GPM_L3/IMERG_V07") \
+                        .filterBounds(aoi).filterDate(start_date, end_date)
+            chirps_coll = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY") \
+                           .filterBounds(aoi).filterDate(start_date, end_date)
+            
+            # Daily Mean Precipitation per pixel
+            # GPM is mm/hr -> multiply by 24 for daily rate proxy
+            gpm_mean = gpm_coll.select('precipitation').mean().multiply(24)
+            chirps_mean = chirps_coll.select('precipitation').mean()
+            
+            # Compute Absolute Difference (mm/day) as uncertainty proxy
+            discrepancy = gpm_mean.subtract(chirps_mean).abs()
+            
+            # Visualization: Green (Low diff/High Accuracy) to Red (High diff/Uncertainty)
+            viz_params = {
+                'min': 0,
+                'max': 5, # Significant divergence threshold
+                'palette': ['#10B981', '#FBBF24', '#EF4444'] 
+            }
+            
+            # Return tile fetcher URL
+            map_data = discrepancy.clip(aoi).getMapId(viz_params)
+            return {'url': map_data['tile_fetcher'].url_format}
+            
+        except Exception as e:
+            logger.error(f"Failed to generate accuracy map: {e}")
+            raise e
