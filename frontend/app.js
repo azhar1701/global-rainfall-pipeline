@@ -15,6 +15,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setupPresets();
 });
 
+// Helper to get CSS variable values
+function getThemeColor(varName) {
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
 // Setup Leaflet Map
 function initMap() {
     map = L.map('map').setView([0, 0], 2);
@@ -213,11 +218,11 @@ async function handlePointSample(lat, lon) {
 
 // Workflow Step Management
 const WORKFLOW_STAGE_MAP = {
-    'parsing_aoi':             { step: 'aoi',     done: ['auth'] },
-    'initializing_providers':  { step: 'aoi',     done: ['auth'] },
-    'fetching_data':           { step: 'fetch',   done: ['auth', 'aoi'] },
-    'merging_results':         { step: 'process', done: ['auth', 'aoi', 'fetch'] },
-    'completed':               { step: 'done',    done: ['auth', 'aoi', 'fetch', 'process', 'analyze'] },
+    'parsing_aoi': { step: 'aoi', done: ['auth'] },
+    'initializing_providers': { step: 'aoi', done: ['auth'] },
+    'fetching_data': { step: 'fetch', done: ['auth', 'aoi'] },
+    'merging_results': { step: 'process', done: ['auth', 'aoi', 'fetch'] },
+    'completed': { step: 'done', done: ['auth', 'aoi', 'fetch', 'process', 'analyze'] },
 };
 
 function updateWorkflowSteps(stage) {
@@ -405,7 +410,8 @@ function updateVisualizations(data, analytics, errorMsg) {
         const firstKey = Object.keys(analytics)[0];
         const trend = analytics[firstKey];
         if (trend.status === 'success') {
-            chartTitle.innerHTML = `Time Series Analysis <span style="font-size:0.75rem; color:#14B8A6">(Trend: ${trend.trend})</span>`;
+            const teal = getThemeColor('--color-teal');
+            chartTitle.innerHTML = `Time Series Analysis <span style="font-size:0.75rem; color:${teal}">(Trend: ${trend.trend})</span>`;
         }
     }
 
@@ -421,9 +427,9 @@ function updateVisualizations(data, analytics, errorMsg) {
                 data: data.map(d => d.precip_chirps),
                 smooth: true,
                 areaStyle: { opacity: 0.1 },
-                itemStyle: { color: '#3B82F6' },
+                itemStyle: { color: getThemeColor('--color-primary') },
                 markPoint: {
-                    data: data.filter(d => d.anomaly_chirps).map(d => ({ coord: [formatDate(d.date), d.precip_chirps], symbol: 'pin', itemStyle: { color: '#EF4444' } }))
+                    data: data.filter(d => d.anomaly_chirps).map(d => ({ coord: [formatDate(d.date), d.precip_chirps], symbol: 'pin', itemStyle: { color: getThemeColor('--color-error') } }))
                 }
             },
             {
@@ -432,9 +438,9 @@ function updateVisualizations(data, analytics, errorMsg) {
                 data: data.map(d => d.precip_gpm),
                 smooth: true,
                 areaStyle: { opacity: 0.1 },
-                itemStyle: { color: '#F97316' },
+                itemStyle: { color: getThemeColor('--color-cta') },
                 markPoint: {
-                    data: data.filter(d => d.anomaly_gpm).map(d => ({ coord: [formatDate(d.date), d.precip_gpm], symbol: 'pin', itemStyle: { color: '#EF4444' } }))
+                    data: data.filter(d => d.anomaly_gpm).map(d => ({ coord: [formatDate(d.date), d.precip_gpm], symbol: 'pin', itemStyle: { color: getThemeColor('--color-error') } }))
                 }
             }
         ];
@@ -446,9 +452,9 @@ function updateVisualizations(data, analytics, errorMsg) {
                 data: data.map(d => d.precipitation),
                 smooth: true,
                 areaStyle: { opacity: 0.1 },
-                itemStyle: { color: '#3B82F6' },
+                itemStyle: { color: getThemeColor('--color-primary') },
                 markPoint: {
-                    data: data.filter(d => d.is_anomaly).map(d => ({ coord: [formatDate(d.date), d.precipitation], symbol: 'pin', itemStyle: { color: '#EF4444' } }))
+                    data: data.filter(d => d.is_anomaly).map(d => ({ coord: [formatDate(d.date), d.precipitation], symbol: 'pin', itemStyle: { color: getThemeColor('--color-error') } }))
                 }
             },
             {
@@ -456,7 +462,7 @@ function updateVisualizations(data, analytics, errorMsg) {
                 type: 'line',
                 data: data.map(d => d.rolling_avg_7d),
                 lineStyle: { type: 'dashed' },
-                itemStyle: { color: '#14B8A6' },
+                itemStyle: { color: getThemeColor('--color-teal') },
                 symbol: 'none'
             }
         ];

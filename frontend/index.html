@@ -44,13 +44,13 @@
         <!-- Main Dashboard -->
         <main class="dashboard">
             <!-- Sidebar Controls -->
-            <aside class="sidebar glass-card">
-                <h2 class="section-title">Configuration</h2>
-                <form id="pipeline-form">
+            <aside class="sidebar glass-card" role="region" aria-labelledby="config-title">
+                <h2 id="config-title" class="section-title">Configuration</h2>
+                <form id="pipeline-form" aria-live="polite">
 
                     <div class="form-group">
-                        <label for="provider">Data Provider</label>
-                        <select id="provider" name="provider" required>
+                        <label for="provider">Data Source</label>
+                        <select id="provider" name="provider" required aria-required="true">
                             <option value="chirps">CHIRPS (Daily, ~0.05°)</option>
                             <option value="gpm">GPM IMERG (Daily, ~0.1°)</option>
                             <option value="both">Both (CHIRPS + GPM Comparison)</option>
@@ -59,190 +59,224 @@
 
                     <div class="form-group">
                         <label for="start_date">Start Date</label>
-                        <input type="date" id="start_date" name="start_date" required placeholder="YYYY-MM-DD"
+                        <input type="date" id="start_date" name="start_date" required aria-required="true"
                             value="2024-01-01">
                     </div>
 
                     <div class="form-group">
                         <label for="end_date">End Date</label>
-                        <input type="date" id="end_date" name="end_date" required placeholder="YYYY-MM-DD"
+                        <input type="date" id="end_date" name="end_date" required aria-required="true"
                             value="2024-01-31">
                     </div>
 
                     <div class="form-group">
-                        <label>Quick Presets</label>
-                        <div class="preset-buttons">
-                            <button type="button" class="btn-preset" data-days="30">30D</button>
-                            <button type="button" class="btn-preset" data-days="90">90D</button>
-                            <button type="button" class="btn-preset" data-days="365">1Y</button>
-                            <button type="button" class="btn-preset" data-days="1825">5Y</button>
+                        <label id="presets-label">Quick Time Range</label>
+                        <div class="preset-buttons" role="group" aria-labelledby="presets-label">
+                            <button type="button" class="btn-preset" data-days="30"
+                                aria-label="Last 30 days">30D</button>
+                            <button type="button" class="btn-preset" data-days="90"
+                                aria-label="Last 90 days">90D</button>
+                            <button type="button" class="btn-preset" data-days="365" aria-label="Last Year">1Y</button>
+                            <button type="button" class="btn-preset" data-days="1825"
+                                aria-label="Last 5 Years">5Y</button>
                         </div>
                     </div>
 
                     <div class="form-group">
                         <label for="aoi_file">Area of Interest (GeoJSON)</label>
-                        <div class="file-drop-area" id="drop-area">
-                            <span class="file-msg">Choose a .geojson file or drag it here</span>
+                        <div class="file-drop-area" id="drop-area" role="button" aria-controls="aoi_file">
+                            <span class="file-msg">Upload .geojson or drag & drop</span>
                             <input class="file-input" type="file" id="aoi_file" name="aoi_file"
-                                accept=".geojson,application/geo+json" required>
+                                accept=".geojson,application/geo+json" required aria-required="true">
                         </div>
                     </div>
 
                     <button type="submit" id="submit-btn" class="btn-cta">
-                        <span class="btn-text">Run Pipeline</span>
-                        <svg class="spinner hidden" viewBox="0 0 50 50">
+                        <span class="btn-text">Execute Pipeline</span>
+                        <svg class="spinner hidden" viewBox="0 0 50 50" aria-hidden="true">
                             <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
                         </svg>
                     </button>
-                    <div id="form-error" class="error-msg hidden"></div>
+                    <div id="form-error" class="error-msg hidden" role="alert"></div>
 
-                    <!-- Progress Tracker (New) -->
-                    <div id="progress-container" class="progress-container hidden">
+                    <!-- Progress Tracker -->
+                    <div id="progress-container" class="progress-container hidden" role="status" aria-live="polite">
                         <div class="progress-label">
-                            <span id="progress-stage">Initializing...</span>
+                            <span id="progress-stage">Initializing Analysis...</span>
                             <span id="progress-percent">0%</span>
                         </div>
                         <div class="progress-bar">
-                            <div id="progress-inner" class="progress-inner"></div>
+                            <div id="progress-inner" class="progress-inner" aria-hidden="true"></div>
                         </div>
                     </div>
                 </form>
             </aside>
 
             <!-- Visualization Area -->
-            <section class="visualizations">
+            <section class="visualizations" role="region" aria-label="Analysis Results">
 
                 <!-- Pipeline Workflow Visualizer -->
-                <div id="workflow-panel" class="workflow-panel glass-card hidden">
-                    <h2 class="section-title">Pipeline Workflow</h2>
-                    <div class="workflow-steps">
-                        <div class="workflow-step" data-step="auth">
-                            <div class="step-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <div id="workflow-panel" class="workflow-panel glass-card hidden" role="group" aria-label="Job Status">
+                    <h2 class="section-title">Execution Stages</h2>
+                    <div class="workflow-steps" role="list">
+                        <div class="workflow-step" data-step="auth" role="listitem">
+                            <div class="step-icon" aria-hidden="true">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                </svg>
                             </div>
                             <div class="step-info">
-                                <span class="step-label">Authentication</span>
-                                <span class="step-detail">Verifying GEE credentials</span>
+                                <span class="step-label">Auth</span>
+                                <span class="step-detail">Earth Engine</span>
                             </div>
-                            <div class="step-status-icon"></div>
+                            <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector"></div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
 
-                        <div class="workflow-step" data-step="aoi">
-                            <div class="step-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                        <div class="workflow-step" data-step="aoi" role="listitem">
+                            <div class="step-icon" aria-hidden="true">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                                    <line x1="8" y1="2" x2="8" y2="18" />
+                                    <line x1="16" y1="6" x2="16" y2="22" />
+                                </svg>
                             </div>
                             <div class="step-info">
-                                <span class="step-label">Parsing AOI</span>
-                                <span class="step-detail">Reading geometry boundaries</span>
+                                <span class="step-label">Bounds</span>
+                                <span class="step-detail">Parsing AOI</span>
                             </div>
-                            <div class="step-status-icon"></div>
+                            <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector"></div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
 
-                        <div class="workflow-step" data-step="fetch">
-                            <div class="step-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        <div class="workflow-step" data-step="fetch" role="listitem">
+                            <div class="step-icon" aria-hidden="true">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                                </svg>
                             </div>
                             <div class="step-info">
-                                <span class="step-label">Fetching Data</span>
-                                <span class="step-detail">Querying Earth Engine chunks</span>
+                                <span class="step-label">Query</span>
+                                <span class="step-detail">Retrieving Data</span>
                             </div>
-                            <div class="step-status-icon"></div>
+                            <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector"></div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
 
-                        <div class="workflow-step" data-step="process">
-                            <div class="step-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <div class="workflow-step" data-step="process" role="listitem">
+                            <div class="step-icon" aria-hidden="true">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <circle cx="12" cy="12" r="3" />
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                                </svg>
                             </div>
                             <div class="step-info">
-                                <span class="step-label">Processing</span>
-                                <span class="step-detail">IDW imputation & resampling</span>
+                                <span class="step-label">Compute</span>
+                                <span class="step-detail">Aggregation</span>
                             </div>
-                            <div class="step-status-icon"></div>
+                            <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector"></div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
 
-                        <div class="workflow-step" data-step="analyze">
-                            <div class="step-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        <div class="workflow-step" data-step="analyze" role="listitem">
+                            <div class="step-icon" aria-hidden="true">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="18" y1="20" x2="18" y2="10" />
+                                    <line x1="12" y1="20" x2="12" y2="4" />
+                                    <line x1="6" y1="20" x2="6" y2="14" />
+                                </svg>
                             </div>
                             <div class="step-info">
-                                <span class="step-label">Trend Analysis</span>
-                                <span class="step-detail">Mann-Kendall & anomaly detection</span>
+                                <span class="step-label">Analysis</span>
+                                <span class="step-detail">Trend Detection</span>
                             </div>
-                            <div class="step-status-icon"></div>
+                            <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
-                        <div class="workflow-connector"></div>
+                        <div class="workflow-connector" aria-hidden="true"></div>
 
-                        <div class="workflow-step" data-step="done">
-                            <div class="step-icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        <div class="workflow-step" data-step="done" role="listitem">
+                            <div class="step-icon" aria-hidden="true">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                    <polyline points="22 4 12 14.01 9 11.01" />
+                                </svg>
                             </div>
                             <div class="step-info">
-                                <span class="step-label">Complete</span>
-                                <span class="step-detail">Data ready for visualization</span>
+                                <span class="step-label">Ready</span>
+                                <span class="step-detail">Visualization</span>
                             </div>
-                            <div class="step-status-icon"></div>
+                            <div class="step-status-icon" aria-hidden="true"></div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Data Overview Cards -->
-                <div class="stats-grid">
-                    <div class="stat-card glass-card">
-                        <div class="stat-title">Total Precipitation</div>
-                        <div class="stat-value font-data" id="stat-total">-- mm</div>
+                <div class="stats-grid" role="group" aria-label="Key Analytics">
+                    <div class="stat-card glass-card" role="status">
+                        <div class="stat-title" id="lbl-total">Total Precipitation</div>
+                        <div class="stat-value font-data" id="stat-total" aria-labelledby="lbl-total">-- mm</div>
                     </div>
-                    <div class="stat-card glass-card">
-                        <div class="stat-title">Daily Average</div>
-                        <div class="stat-value font-data" id="stat-avg">-- mm</div>
+                    <div class="stat-card glass-card" role="status">
+                        <div class="stat-title" id="lbl-avg">Daily Average</div>
+                        <div class="stat-value font-data" id="stat-avg" aria-labelledby="lbl-avg">-- mm</div>
                     </div>
-                    <div class="stat-card glass-card">
-                        <div class="stat-title">Max Single Day</div>
-                        <div class="stat-value font-data" id="stat-max">-- mm</div>
+                    <div class="stat-card glass-card" role="status">
+                        <div class="stat-title" id="lbl-max">Max Single Day</div>
+                        <div class="stat-value font-data" id="stat-max" aria-labelledby="lbl-max">-- mm</div>
                     </div>
-                    <div class="stat-card glass-card">
-                        <div class="stat-title">Anomalies</div>
-                        <div class="stat-value font-data text-error" id="stat-anomalies">0</div>
+                    <div class="stat-card glass-card" role="status">
+                        <div class="stat-title" id="lbl-anomalies">Anomalies Detected</div>
+                        <div class="stat-value font-data text-error" id="stat-anomalies"
+                            aria-labelledby="lbl-anomalies">0</div>
                     </div>
                 </div>
 
                 <!-- Map & Chart Split -->
                 <div class="vis-split">
                     <!-- Map -->
-                    <div class="map-container glass-card">
-                        <h2 class="section-title">Area of Interest preview</h2>
-                        <div id="map"></div>
+                    <div class="map-container glass-card" role="region" aria-label="Spatial Preview">
+                        <h2 class="section-title">Geographic Context</h2>
+                        <div id="map" aria-label="Interactive map showing area of interest"></div>
                     </div>
 
                     <!-- Chart -->
-                    <div class="chart-container glass-card">
-                        <h2 class="section-title">Time Series Analysis</h2>
+                    <div class="chart-container glass-card" role="region" aria-label="Temporal Analysis">
+                        <h2 class="section-title" id="chart-title">Rainfall Trends</h2>
                         <div class="chart-wrapper">
-                            <div id="rainfallChart" style="width: 100%; height: 100%;"></div>
+                            <div id="rainfallChart" style="width: 100%; height: 100%;"
+                                aria-label="Interactive rainfall time-series chart"></div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Data Table -->
-                <div class="data-table-container glass-card">
+                <div class="data-table-container glass-card" role="region" aria-label="Raw Data Export">
                     <div class="table-header">
-                        <h2 class="section-title">Raw Data Export</h2>
-                        <button id="download-btn" class="btn-secondary" disabled>Download CSV</button>
+                        <h2 class="section-title">Extracted Data</h2>
+                        <button id="download-btn" class="btn-secondary" disabled aria-label="Download CSV data">Download
+                            CSV</button>
                     </div>
                     <div class="table-scroll">
-                        <table id="data-table">
+                        <table id="data-table" aria-describedby="table-info">
+                            <caption id="table-info" class="sr-only">Precipitation values by date</caption>
                             <thead>
                                 <tr>
-                                    <th>Date (UTC)</th>
-                                    <th>Precipitation (mm)</th>
+                                    <th scope="col">Date (UTC)</th>
+                                    <th scope="col">Precipitation (mm)</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td colspan="2" class="text-center text-muted">Awaiting pipeline execution...</td>
+                                    <td colspan="2" class="text-center text-muted">Initialize the pipeline and select an
+                                        area of interest.</td>
                                 </tr>
                             </tbody>
                         </table>

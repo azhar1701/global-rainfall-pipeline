@@ -118,16 +118,20 @@ body {
     }
 }
 
-/* Glassmorphism Cards */
+/* Professional Scientific Glassmorphism */
 .glass-card {
-    background: var(--bg-card);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid var(--border-color);
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-md);
     padding: 1.5rem;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    transition: background 0.3s ease;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.glass-card:hover {
+    border-color: rgba(59, 130, 246, 0.3);
 }
 
 .section-title {
@@ -308,13 +312,13 @@ button {
     color: var(--color-primary);
 }
 
-/* Map & Chart Split */
+/* Responsive Visualization Split */
 .vis-split {
     display: grid;
     grid-template-columns: 1fr 2fr;
     gap: 1.5rem;
-    height: 500px;
-    /* Increased height for better visibility */
+    min-height: 500px;
+    height: auto;
 }
 
 @media (max-width: 1280px) {
@@ -521,7 +525,7 @@ th {
     padding: 0.625rem 0.875rem;
     border-radius: var(--radius-sm);
     border: 1px solid transparent;
-    background: rgba(255,255,255,0.03);
+    background: rgba(255, 255, 255, 0.03);
     min-width: 170px;
     transition: all 0.4s ease;
     position: relative;
@@ -534,7 +538,7 @@ th {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255,255,255,0.06);
+    background: rgba(255, 255, 255, 0.06);
     color: var(--text-muted);
     flex-shrink: 0;
     transition: all 0.4s ease;
@@ -554,7 +558,7 @@ th {
 
 .workflow-step .step-detail {
     font-size: 0.65rem;
-    color: rgba(148,163,184,0.6);
+    color: rgba(148, 163, 184, 0.6);
     white-space: nowrap;
 }
 
@@ -569,7 +573,7 @@ th {
     width: 24px;
     min-width: 24px;
     height: 2px;
-    background: rgba(255,255,255,0.08);
+    background: rgba(255, 255, 255, 0.08);
     flex-shrink: 0;
     transition: background 0.4s ease;
     position: relative;
@@ -577,15 +581,15 @@ th {
 
 /* Active State */
 .workflow-step.is-active {
-    border-color: rgba(59,130,246,0.4);
-    background: rgba(59,130,246,0.08);
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(59, 130, 246, 0.08);
 }
 
 .workflow-step.is-active .step-icon {
-    background: rgba(59,130,246,0.2);
+    background: rgba(59, 130, 246, 0.2);
     color: var(--color-primary);
-    box-shadow: 0 0 12px rgba(59,130,246,0.3);
-    animation: pulse-glow 1.5s ease-in-out infinite;
+    border: 1px solid var(--color-primary);
+    animation: pulse-opacity 2s ease-in-out infinite;
 }
 
 .workflow-step.is-active .step-label {
@@ -605,7 +609,7 @@ th {
 
 /* Done State */
 .workflow-step.is-done .step-icon {
-    background: rgba(20,184,166,0.15);
+    background: rgba(20, 184, 166, 0.15);
     color: var(--color-teal);
 }
 
@@ -622,12 +626,12 @@ th {
 
 .workflow-connector.is-done {
     background: var(--color-teal);
-    box-shadow: 0 0 6px rgba(20,184,166,0.4);
+    box-shadow: 0 0 6px rgba(20, 184, 166, 0.4);
 }
 
 /* Error State */
 .workflow-step.is-error .step-icon {
-    background: rgba(239,68,68,0.15);
+    background: rgba(239, 68, 68, 0.15);
     color: var(--color-error);
 }
 
@@ -642,13 +646,22 @@ th {
     color: var(--color-error);
 }
 
-@keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 8px rgba(59,130,246,0.2); }
-    50% { box-shadow: 0 0 18px rgba(59,130,246,0.5); }
+@keyframes pulse-opacity {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
 }
 
 @keyframes spin-step {
-    100% { transform: rotate(360deg); }
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 @media (max-width: 1280px) {
@@ -656,7 +669,21 @@ th {
         flex-wrap: nowrap;
         overflow-x: auto;
     }
+
     .workflow-step {
         min-width: 140px;
     }
+}
+
+/* Accessibility Utilities */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
 }

@@ -1,0 +1,18 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Jakarta"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.8272,
+                    -6.1751
+                ]
+            }
+        }
+    ]
+}
