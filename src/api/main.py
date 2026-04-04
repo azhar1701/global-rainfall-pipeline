@@ -258,7 +258,27 @@ async def start_pipeline_job(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/jobs/point")
+@app.post("/api/v1/extract/zonal")
+async def extract_zonal(
+    provider: str = Form(...),
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    aoi_file: UploadFile = File(...)
+):
+    """
+    1-Click data export endpoint tailored for hydrological researchers.
+    Accepts a GeoJSON, processes via background pipeline with memory chunking,
+    and returns a job ID to poll for results.
+    """
+    return await start_pipeline_job(
+        provider=provider, 
+        start_date=start_date, 
+        end_date=end_date, 
+        aoi_file=aoi_file
+    )
+
+
+@app.post("/api/jobs")
 async def start_point_job(
     lat: float = Form(...),
     lon: float = Form(...),
@@ -319,6 +339,15 @@ async def export_job_data(job_id: str):
     )
     response.headers["Content-Disposition"] = f"attachment; filename=rainfall_export_{job_id}.csv"
     return response
+
+
+@app.get("/api/v1/export/csv")
+async def export_job_csv(job_id: str):
+    """
+    Simplified v1 endpoint for direct streaming CSV download.
+    Provides strict 1-click data export as requested by the User Advocate.
+    """
+    return await export_job_data(job_id=job_id)
 
 
 @app.get("/api/jobs/{job_id}/geotiff")

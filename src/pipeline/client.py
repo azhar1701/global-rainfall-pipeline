@@ -75,6 +75,37 @@ class GEEClient:
             current = chunk_end + timedelta(days=1)
         return chunks
 
+    @staticmethod
+    def chunk_geometry(aoi: ee.Geometry, max_extent: float = 5.0) -> List[ee.Geometry]:
+        """
+        Splits a large ee.Geometry into a grid of smaller ee.Geometry objects.
+        This provides spatial chunking to prevent memory limit errors on GEE.
+        """
+        bounds = aoi.bounds().coordinates().get(0).getInfo()
+        xs = [coord[0] for coord in bounds]
+        ys = [coord[1] for coord in bounds]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        
+        # If the bounding box is small enough, no spatial chunking is needed
+        if (max_x - min_x) <= max_extent and (max_y - min_y) <= max_extent:
+            return [aoi]
+            
+        chunks = []
+        cur_x = min_x
+        while cur_x < max_x:
+            next_x = min(cur_x + max_extent, max_x)
+            cur_y = min_y
+            while cur_y < max_y:
+                next_y = min(cur_y + max_extent, max_y)
+                chunk_box = ee.Geometry.Rectangle([cur_x, cur_y, next_x, next_y])
+                intersection = aoi.intersection(chunk_box, ee.ErrorMargin(100))
+                chunks.append(intersection)
+                cur_y = next_y
+            cur_x = next_x
+            
+        return chunks
+
     def fetch_in_chunks(self, provider: Any, aoi: ee.Geometry, start_date: str, end_date: str, 
                         chunk_days: int = 30, max_workers: int = 8,
                         progress_callback: Optional[Callable[[int, int], None]] = None) -> Dict:

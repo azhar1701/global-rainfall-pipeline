@@ -179,7 +179,7 @@ function setupForm() {
 
         try {
             // Call FastAPI Backend to start Job
-            const response = await fetch('/api/jobs', {
+            const response = await fetch('/api/v1/extract/zonal', {
                 method: 'POST',
                 body: formData
             });
@@ -765,7 +765,7 @@ function setupDownload() {
     const btn = document.getElementById('download-btn');
     btn.addEventListener('click', () => {
         if (window.lastJobId) {
-            window.open(`/api/jobs/${window.lastJobId}/export`, '_blank');
+            window.open(`/api/v1/export/csv?job_id=${window.lastJobId}`, '_blank');
         } else {
             alert("No job data available to export yet.");
         }
